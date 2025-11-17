@@ -1,0 +1,133 @@
+import { Layout, Menu, Button, Dropdown, Avatar, Space } from 'antd';
+import { UserOutlined, LogoutOutlined, DashboardOutlined, HistoryOutlined } from '@ant-design/icons';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useSelector, useDispatch } from 'react-redux';
+import { logout } from '../../redux/slices/authSlice';
+
+const { Header: AntHeader } = Layout;
+
+const Header = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const dispatch = useDispatch();
+  const { isAuthenticated, user } = useSelector((state) => state.auth);
+
+  const handleLogout = async () => {
+    await dispatch(logout());
+    navigate('/login');
+  };
+
+  // Menu items cho user dropdown
+  const userMenuItems = [
+    {
+      key: 'profile',
+      icon: <UserOutlined />,
+      label: 'Thông tin cá nhân',
+      onClick: () => navigate('/profile'),
+    },
+    {
+      key: 'my-bookings',
+      icon: <HistoryOutlined />,
+      label: 'Vé của tôi',
+      onClick: () => navigate('/my-bookings'),
+    },
+    ...(user?.roles?.some(r => ['Admin', 'Nhân viên'].includes(r.TenVaiTro))
+      ? [{
+          key: 'admin',
+          icon: <DashboardOutlined />,
+          label: 'Quản trị',
+          onClick: () => navigate('/admin'),
+        }]
+      : []
+    ),
+    {
+      type: 'divider',
+    },
+    {
+      key: 'logout',
+      icon: <LogoutOutlined />,
+      label: 'Đăng xuất',
+      onClick: handleLogout,
+      danger: true,
+    },
+  ];
+
+  // Xác định menu item nào đang active
+  const getSelectedKey = () => {
+    if (location.pathname === '/') return 'home';
+    if (location.pathname.startsWith('/search')) return 'search';
+    return '';
+  };
+
+  return (
+    <AntHeader style={{ 
+      position: 'sticky', 
+      top: 0, 
+      zIndex: 1000, 
+      width: '100%',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '0 50px',
+      background: '#001529',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+    }}>
+      {/* Logo & Menu */}
+      <div style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+        <Link 
+          to="/" 
+          style={{ 
+            color: 'white', 
+            fontSize: '20px', 
+            fontWeight: 'bold', 
+            marginRight: '50px',
+            textDecoration: 'none'
+          }}
+        >
+          🚌 Hoàng Hải
+        </Link>
+        
+        <Menu
+          theme="dark"
+          mode="horizontal"
+          selectedKeys={[getSelectedKey()]}
+          style={{ flex: 1, minWidth: 0, border: 'none', background: 'transparent' }}
+        >
+          <Menu.Item key="home">
+            <Link to="/">Trang chủ</Link>
+          </Menu.Item>
+          <Menu.Item key="search">
+            <Link to="/search">Tra cứu chuyến</Link>
+          </Menu.Item>
+        </Menu>
+      </div>
+
+      {/* Auth Section */}
+      <div>
+        {isAuthenticated ? (
+          <Dropdown 
+            menu={{ items: userMenuItems }} 
+            placement="bottomRight"
+            trigger={['click']}
+          >
+            <Space style={{ cursor: 'pointer', color: 'white' }}>
+              <Avatar icon={<UserOutlined />} style={{ background: '#1890ff' }} />
+              <span>{user?.HoTen}</span>
+            </Space>
+          </Dropdown>
+        ) : (
+          <Space>
+            <Button onClick={() => navigate('/login')}>
+              Đăng nhập
+            </Button>
+            <Button type="primary" onClick={() => navigate('/register')}>
+              Đăng ký
+            </Button>
+          </Space>
+        )}
+      </div>
+    </AntHeader>
+  );
+};
+
+export default Header;
