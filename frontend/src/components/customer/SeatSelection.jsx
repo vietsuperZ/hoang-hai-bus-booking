@@ -54,10 +54,6 @@ const SeatSelection = ({ totalSeats, bookedSeats = [], onSelectSeats, selectedSe
     if (isCurrentlySelected) {
       newSelectedSeats = selectedSeats.filter(s => s !== seatCode);
     } else {
-      if (selectedSeats.length >= 5) {
-        message.warning('Chỉ được chọn tối đa 5 ghế');
-        return;
-      }
       newSelectedSeats = [...selectedSeats, seatCode];
     }
 
@@ -268,7 +264,7 @@ const SeatSelection = ({ totalSeats, bookedSeats = [], onSelectSeats, selectedSe
           color: 'white'
         }}>
           <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '10px' }}>
-            ✅ Ghế đã chọn ({selectedSeats.length}/5):
+             Ghế đã chọn:
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {selectedSeats.map(seat => (

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Layout, Card, Descriptions, Form, Input, Button, Select, Row, Col, message, Spin, Modal } from 'antd';
+import { CheckCircleOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -18,6 +19,11 @@ const BookingPage = () => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const [selectedSeats, setSelectedSeats] = useState([]);
+  
+  // STATE: Modal thành công
+  const [isSuccessModalVisible, setIsSuccessModalVisible] = useState(false);
+  const [bookingCode, setBookingCode] = useState('');
+  
   const [paymentMethods] = useState([
     { id: 1, name: 'Tiền mặt' },
     { id: 2, name: 'Chuyển khoản' },
@@ -31,7 +37,7 @@ const BookingPage = () => {
   });
 
   // Lấy sơ đồ ghế
-  const { data: seatsData, isLoading: seatsLoading } = useQuery({
+  const { data: seatsData, isLoading: seatsLoading, refetch: refetchSeats } = useQuery({
     queryKey: ['trip-seats', tripId],
     queryFn: () => tripService.getTripSeats(tripId)
   });
@@ -39,22 +45,18 @@ const BookingPage = () => {
   // Mutation đặt vé
   const bookingMutation = useMutation({
     mutationFn: bookingService.createBooking,
-    onSuccess: (data) => {
-      Modal.success({
-        title: 'Đặt vé thành công!',
-        content: (
-          <div>
-            <p>Mã đặt vé: <strong>{data.data.MaBooking}</strong></p>
-            <p>Vui lòng thanh toán trong vòng 10 phút để giữ chỗ.</p>
-          </div>
-        ),
-        onOk: () => {
-          navigate('/my-bookings');
-        }
-      });
+    onSuccess: (response) => {
+      const code = response?.data?.MaBooking || 'N/A';
+      setBookingCode(code);
+      setIsSuccessModalVisible(true);
+      
+      // Reset form và seats
+      form.resetFields();
+      setSelectedSeats([]);
+      refetchSeats();
     },
     onError: (error) => {
-      message.error(error.message || 'Đặt vé thất bại');
+      message.error(error?.message || 'Đặt vé thất bại. Vui lòng thử lại.');
     }
   });
 
@@ -95,6 +97,16 @@ const BookingPage = () => {
     };
 
     bookingMutation.mutate(bookingData);
+  };
+
+  // Xử lý đóng modal thành công
+  const handleSuccessModalClose = () => {
+    setIsSuccessModalVisible(false);
+    navigate('/my-bookings');
+  };
+  const handleSuccessModalOut = () => {
+    setIsSuccessModalVisible(false);
+    navigate('/booking-page');
   };
 
   if (tripLoading || seatsLoading) {
@@ -265,6 +277,60 @@ const BookingPage = () => {
         </div>
       </Content>
       <Footer />
+
+      {/* MODAL THÀNH CÔNG */}
+      <Modal
+        open={isSuccessModalVisible}
+        onCancel={handleSuccessModalOut}
+        footer={[
+          <Button 
+            key="ok" 
+            type="primary" 
+            onClick={handleSuccessModalClose}
+            size="large"
+          >
+            Xem vé của tôi
+          </Button>
+        ]}
+        width={500}
+        centered
+        mask={false}
+        maskClosable={false}
+      >
+        <div style={{ textAlign: 'center', padding: '30px 20px' }}>
+          <CheckCircleOutlined 
+            style={{ 
+              fontSize: '80px', 
+              color: '#52c41a',
+              marginBottom: '20px'
+            }} 
+          />
+          <h2 style={{ fontSize: '24px', marginBottom: '20px', color: '#52c41a' }}>
+            Đặt vé thành công!
+          </h2>
+          <div style={{ 
+            background: '#f0f9ff', 
+            padding: '20px', 
+            borderRadius: '8px',
+            marginBottom: '15px'
+          }}>
+            <p style={{ fontSize: '14px', color: '#666', marginBottom: '10px' }}>
+              Mã đặt vé của bạn:
+            </p>
+            <p style={{ 
+              fontSize: '28px', 
+              fontWeight: 'bold', 
+              color: '#1890ff',
+              margin: 0
+            }}>
+              {bookingCode}
+            </p>
+          </div>
+          <p style={{ color: '#666', fontSize: '14px' }}>
+            Vui lòng thanh toán trong vòng 10 phút để giữ chỗ.
+          </p>
+        </div>
+      </Modal>
     </Layout>
   );
 };

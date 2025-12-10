@@ -1,4 +1,4 @@
-const { Booking, Ticket, Trip, Route, Location, Bus, PaymentMethod } = require('../models');
+const { Booking, Ticket, Trip, Route, Location, Bus, PaymentMethod, User } = require('../models');
 const { generateUniqueBookingCode } = require('../utils/generateBookingCode');
 const { sequelize } = require('../config/database');
 const { Op } = require('sequelize');
@@ -38,13 +38,13 @@ const createBooking = async (req, res, next) => {
       });
     }
 
-    // Kiểm tra ghế đã được đặt chưa
+    // Kiểm tra ghế đã được đặt chưa (CHỈ kiểm tra ghế chưa hủy)
     const seatCodes = seats.map(s => s.MaGhe);
     const bookedSeats = await Ticket.findAll({
       where: {
         MaChuyen,
         MaGhe: { [Op.in]: seatCodes },
-        TrangThaiVe: { [Op.in]: [0, 1] } // Đang giữ hoặc đã thanh toán
+        TrangThaiVe: { [Op.in]: [0, 1] } // CHỈ kiểm tra: Đang giữ hoặc Đã thanh toán (KHÔNG bao gồm đã hủy = 2)
       },
       transaction
     });
@@ -131,7 +131,7 @@ const createBooking = async (req, res, next) => {
   }
 };
 
-// @desc    Lấy lịch sử đặt vé của user
+// @desc    Lấy lịch sử đặt vé của user (KHÔNG bao gồm vé đã hủy hoàn toàn)
 // @route   GET /api/bookings/my-bookings
 // @access  Private
 const getMyBookings = async (req, res, next) => {
@@ -153,7 +153,8 @@ const getMyBookings = async (req, res, next) => {
                   { model: Location, as: 'diemDi' },
                   { model: Location, as: 'diemDen' }
                 ]
-              }
+              },
+              { model: Bus, as: 'bus' }
             ]
           }]
         },
@@ -261,11 +262,11 @@ const cancelBooking = async (req, res, next) => {
       });
     }
 
-    // Cập nhật trạng thái vé
-    await Ticket.update(
-      { TrangThaiVe: 2 }, // Đã hủy
-      { where: { MaDon: booking.MaDon }, transaction }
-    );
+    // XÓA HẲN VÉ ĐÃ HỦY để giải phóng ghế
+    await Ticket.destroy({
+      where: { MaDon: booking.MaDon },
+      transaction
+    });
 
     await transaction.commit();
 
@@ -350,7 +351,7 @@ const getAllBookings = async (req, res, next) => {
             }]
           }]
         },
-        { model: require('./User'), as: 'user', attributes: ['HoTen', 'Email', 'SDT'] }
+        { model: User, as: 'user', attributes: ['HoTen', 'Email', 'SDT'] }
       ],
       order: [['NgayDat', 'DESC']]
     });

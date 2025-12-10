@@ -50,6 +50,7 @@ import SearchTrips from './pages/SearchTrips';
 import BookingPage from './pages/BookingPage';
 import MyBookings from './pages/MyBookings';
 import AdminDashboard from './pages/AdminDashboard';
+import TicketDetail from './pages/TicketDetail';
 
 // Components
 import PrivateRoute from './components/common/PrivateRoute';
@@ -102,6 +103,15 @@ function App() {
                 element={
                   <PrivateRoute>
                     <MyBookings />
+                  </PrivateRoute>
+                }
+              />
+
+              <Route
+                path="/booking-details"
+                element={
+                  <PrivateRoute>
+                    <TicketDetail />
                   </PrivateRoute>
                 }
               />

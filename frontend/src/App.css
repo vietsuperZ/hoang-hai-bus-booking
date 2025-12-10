@@ -40,3 +40,11 @@
 .read-the-docs {
   color: #888;
 }
+
+.ant-modal {
+  z-index: 9999 !important;
+}
+
+.ant-modal-mask {
+  z-index: 9998 !important;
+}
