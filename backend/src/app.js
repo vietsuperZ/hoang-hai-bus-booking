@@ -119,6 +119,7 @@ const seedInitialData = async () => {
     console.error('❌ Error seeding data:', error.message);
   }
 };
+
 startServer();
 
 module.exports = app;
