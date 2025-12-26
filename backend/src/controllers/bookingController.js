@@ -366,7 +366,140 @@ const getAllBookings = async (req, res, next) => {
   }
 };
 
+// @desc    Webhook từ Casso khi có giao dịch
+// @route   POST /api/bookings/casso-webhook
+// @access  Public (nhưng verify bằng secret key)
+const cassoWebhook = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  
+  try {
+    console.log('📥 Casso Webhook received:', req.body);
+    
+    const { data, error } = req.body;
+    
+    if (error) {
+      return res.status(200).json({ success: true }); // Vẫn trả 200 để Casso không retry
+    }
+
+    // Duyệt qua các giao dịch
+    for (const txn of data) {
+      const { 
+        amount,           // Số tiền
+        description,      // Nội dung chuyển khoản
+        when,            // Thời gian
+        transaction_id   // Mã giao dịch ngân hàng
+      } = txn;
+
+      // Tìm mã booking trong nội dung (format: HH123456)
+      const bookingCodeMatch = description.match(/HH\d{6}/i);
+      
+      if (!bookingCodeMatch) {
+        console.log('❌ Không tìm thấy mã booking:', description);
+        continue;
+      }
+
+      const bookingCode = bookingCodeMatch[0].toUpperCase();
+      console.log('🔍 Tìm thấy mã booking:', bookingCode);
+
+      // Tìm booking
+      const booking = await Booking.findOne({
+        where: { MaBooking: bookingCode },
+        transaction
+      });
+
+      if (!booking) {
+        console.log('❌ Không tìm thấy booking:', bookingCode);
+        continue;
+      }
+
+      // Kiểm tra đã thanh toán chưa
+      if (booking.TrangThaiTT === 1) {
+        console.log('⚠️ Booking đã được thanh toán:', bookingCode);
+        continue;
+      }
+
+      // Kiểm tra số tiền (cho phép sai số 1000đ)
+      if (amount < booking.TongTien - 1000) {
+        console.log('❌ Số tiền không đủ:', amount, 'cần:', booking.TongTien);
+        continue;
+      }
+
+      console.log('✅ Xác nhận thanh toán:', bookingCode);
+
+      // Cập nhật trạng thái
+      await booking.update({ 
+        TrangThaiTT: 1,
+        NgayThanhToan: new Date(when)
+      }, { transaction });
+
+      // Cập nhật vé
+      await Ticket.update(
+        { TrangThaiVe: 1 },
+        { where: { MaDon: booking.MaDon }, transaction }
+      );
+
+      // TODO: Gửi email xác nhận
+      // await sendConfirmationEmail(booking);
+
+      console.log('💚 Thanh toán thành công:', bookingCode);
+    }
+
+    await transaction.commit();
+
+    res.status(200).json({
+      success: true,
+      message: 'Webhook processed'
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Webhook error:', error);
+    
+    // Vẫn trả 200 để Casso không retry liên tục
+    res.status(200).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+// @desc    Kiểm tra trạng thái thanh toán
+// @route   POST /api/bookings/check-payment
+// @access  Private
+const checkPaymentStatus = async (req, res, next) => {
+  try {
+    const { bookingCode } = req.body;
+
+    const booking = await Booking.findOne({
+      where: { MaBooking: bookingCode }
+    });
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy đơn'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        isPaid: booking.TrangThaiTT === 1,
+        amount: booking.TongTien,
+        paidAt: booking.NgayThanhToan
+      }
+    });
+
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+
 module.exports = {
+  cassoWebhook,
+  checkPaymentStatus,
   createBooking,
   getMyBookings,
   getBookingById,

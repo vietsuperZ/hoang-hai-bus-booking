@@ -120,6 +120,21 @@ const seedInitialData = async () => {
   }
 };
 
+
+// //thanh toan vnpay
+
+// const {VNPay, ignoreLogger, ProductCode, VnpLocale, dateFormat} = require('vnpay');
+// app.post('/api/create-qr', (req, res)=> {
+//   const vnpay = new VNPay({
+//     tmnCode: 'KXGNPUX9',
+//     secureSecret: 'TNRN9TMNMVBJLW33HQ7ZTAV80R8Q7H8D',
+//     vnpayHost: 'https://sandbox.vnpayment.vn',
+//     testMode: true,
+//     hashAlgorithm: 'SHA512',
+//     loggerFn: ignoreLogger,
+//   })
+// })
+
 startServer();
 
 module.exports = app;

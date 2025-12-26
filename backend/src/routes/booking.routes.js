@@ -6,14 +6,20 @@ const {
   getBookingById,
   cancelBooking,
   approveBooking,
-  getAllBookings
+  getAllBookings,
+  cassoWebhook,      // THÊM
+  checkPaymentStatus // THÊM
 } = require('../controllers/bookingController');
 const { authenticate } = require('../middleware/authMiddleware');
 const { authorize } = require('../middleware/roleMiddleware');
 
+// Public webhook - Casso sẽ gọi vào đây
+router.post('/casso-webhook', cassoWebhook);
+
 // Customer routes
 router.post('/', authenticate, createBooking);
 router.get('/my-bookings', authenticate, getMyBookings);
+router.post('/check-payment', authenticate, checkPaymentStatus); // THÊM
 router.get('/:id', authenticate, getBookingById);
 router.delete('/:id', authenticate, cancelBooking);
 

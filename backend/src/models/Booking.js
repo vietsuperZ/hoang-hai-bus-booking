@@ -40,6 +40,11 @@ const Booking = sequelize.define('Booking', {
       key: 'MaPTTT'
     }
   },
+  NgayThanhToan: {
+  type: DataTypes.DATE,
+  allowNull: true,
+  comment: 'Thời gian thanh toán thực tế'
+},
   TrangThaiTT: {
     type: DataTypes.TINYINT,
     allowNull: false,
