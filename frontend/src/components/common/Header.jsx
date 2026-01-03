@@ -1,5 +1,5 @@
 import { Layout, Menu, Button, Dropdown, Avatar, Space } from 'antd';
-import { UserOutlined, LogoutOutlined, DashboardOutlined, HistoryOutlined } from '@ant-design/icons';
+import { UserOutlined, LogoutOutlined, DashboardOutlined, HistoryOutlined, FileTextOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice';
@@ -31,12 +31,23 @@ const Header = () => {
       label: 'Vé của tôi',
       onClick: () => navigate('/my-bookings'),
     },
-    ...(user?.roles?.some(r => ['Admin', 'Nhân viên'].includes(r.TenVaiTro))
+    // CHỈ HIỆN MENU QUẢN TRỊ CHO ADMIN
+    ...(user?.roles?.some(r => r.TenVaiTro === 'Admin')
       ? [{
           key: 'admin',
           icon: <DashboardOutlined />,
           label: 'Quản trị',
           onClick: () => navigate('/admin'),
+        }]
+      : []
+    ),
+    // CHỈ HIỆN MENU NHÂN VIÊN CHO NHÂN VIÊN (KHÔNG PHẢI ADMIN)
+    ...(user?.roles?.some(r => r.TenVaiTro === 'Nhân viên') && !user?.roles?.some(r => r.TenVaiTro === 'Admin')
+      ? [{
+          key: 'employee',
+          icon: <FileTextOutlined />,
+          label: 'Quản lý vé',
+          onClick: () => navigate('/employee'),
         }]
       : []
     ),

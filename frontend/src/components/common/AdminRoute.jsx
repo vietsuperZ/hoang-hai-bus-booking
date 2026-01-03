@@ -8,12 +8,12 @@ const AdminRoute = ({ children }) => {
     return <Navigate to="/login" replace />;
   }
 
-  // Kiểm tra có role Admin hoặc Nhân viên không
-  const hasAccess = user?.roles?.some(
-    (role) => role.TenVaiTro === 'Admin' || role.TenVaiTro === 'Nhân viên'
+  // CHỈ CHO PHÉP ADMIN - KHÔNG CHO NHÂN VIÊN
+  const isAdmin = user?.roles?.some(
+    (role) => role.TenVaiTro === 'Admin'
   );
 
-  if (!hasAccess) {
+  if (!isAdmin) {
     return <Navigate to="/" replace />;
   }
 

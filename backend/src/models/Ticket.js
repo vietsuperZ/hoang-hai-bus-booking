@@ -63,10 +63,10 @@ const Ticket = sequelize.define('Ticket', {
     type: DataTypes.TINYINT,
     allowNull: false,
     defaultValue: 0,
-    comment: '0: Đang giữ chỗ, 1: Đã thanh toán, 2: Đã hủy'
+    comment: '0: Chưa sử dụng, 1: Đã sử dụng'
   }
 }, {
-  tableName: 'ChiTietVe',
+  tableName: 'ChiTietVe', // ← SỬA THÀNH ChiTietVe
   timestamps: false,
   indexes: [
     {

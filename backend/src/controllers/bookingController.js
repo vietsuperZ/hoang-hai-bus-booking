@@ -199,7 +199,8 @@ const getBookingById = async (req, res, next) => {
             ]
           }]
         },
-        { model: PaymentMethod, as: 'paymentMethod' }
+        { model: PaymentMethod, as: 'paymentMethod' },
+        { model: User, as: 'user', attributes: ['HoTen', 'Email', 'SDT'] }
       ]
     });
 
@@ -351,7 +352,15 @@ const getAllBookings = async (req, res, next) => {
             }]
           }]
         },
-        { model: User, as: 'user', attributes: ['HoTen', 'Email', 'SDT'] }
+        { 
+          model: User, 
+          as: 'user', 
+          attributes: ['HoTen', 'Email', 'SDT'] 
+        },
+        { 
+          model: PaymentMethod, 
+          as: 'paymentMethod'
+        }
       ],
       order: [['NgayDat', 'DESC']]
     });

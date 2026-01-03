@@ -83,8 +83,11 @@ const login = async (req, res, next) => {
   try {
     const { Email, MatKhau } = req.body;
 
+    console.log('🔐 Login attempt:', Email);
+
     // Validate input
     if (!Email || !MatKhau) {
+      console.log('❌ Missing credentials');
       return res.status(400).json({
         success: false,
         message: 'Vui lòng nhập email và mật khẩu'
@@ -103,14 +106,20 @@ const login = async (req, res, next) => {
     });
 
     if (!user) {
+      console.log('❌ User not found:', Email);
       return res.status(401).json({
         success: false,
         message: 'Email hoặc mật khẩu không chính xác'
       });
     }
 
+    console.log('✅ User found:', user.Email);
+    console.log('👤 User roles:', user.roles?.map(r => r.TenVaiTro));
+    console.log('📊 User status:', user.TrangThai);
+
     // Kiểm tra tài khoản có bị khóa không
     if (user.TrangThai === 0) {
+      console.log('❌ Account locked');
       return res.status(403).json({
         success: false,
         message: 'Tài khoản của bạn đã bị khóa'
@@ -118,13 +127,19 @@ const login = async (req, res, next) => {
     }
 
     // So sánh mật khẩu
+    console.log('🔑 Comparing password...');
     const isPasswordValid = await user.comparePassword(MatKhau);
+    console.log('🔑 Password valid:', isPasswordValid);
+    
     if (!isPasswordValid) {
+      console.log('❌ Wrong password');
       return res.status(401).json({
         success: false,
         message: 'Email hoặc mật khẩu không chính xác'
       });
     }
+
+    console.log('✅ Generating tokens...');
 
     // Tạo token
     const accessToken = generateAccessToken({
@@ -139,6 +154,8 @@ const login = async (req, res, next) => {
     // Loại bỏ password khỏi response
     const userResponse = user.toJSON();
 
+    console.log('✅ Login successful!');
+
     res.status(200).json({
       success: true,
       message: 'Đăng nhập thành công',
@@ -150,6 +167,7 @@ const login = async (req, res, next) => {
     });
 
   } catch (error) {
+    console.error('❌ Login error:', error);
     next(error);
   }
 };

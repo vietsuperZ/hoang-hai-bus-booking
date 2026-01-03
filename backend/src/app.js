@@ -6,13 +6,17 @@ const { connectDB } = require('./config/database');
 const { syncDatabase } = require('./models');
 const routes = require('./routes');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
+const employeeRoutes = require('./routes/employeeRoutes');
+const userRoutes = require('./routes/userRoutes');
+const employeeBookingRoutes = require('./routes/employeeBookingRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 
 // Khởi tạo Express app
 const app = express();
 
 // ==================== MIDDLEWARE ====================
 
-// CORS
+// CORS - PHẢI ĐẶT TRƯỚC TIÊN!
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true
@@ -32,7 +36,11 @@ if (process.env.NODE_ENV === 'development') {
 
 // ==================== ROUTES ====================
 
+app.use('/api/employees', employeeRoutes);
+app.use('/api/employee', employeeBookingRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api', routes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // ==================== ERROR HANDLING ====================
 
@@ -79,7 +87,8 @@ const seedInitialData = async () => {
         defaults: { TenVaiTro: roleName }
       });
     }
-    
+
+
     // Seed Positions
     const positions = ['Nhân viên Thu ngân', 'Tài xế', 'Phụ xe'];
     for (const posName of positions) {
@@ -119,21 +128,6 @@ const seedInitialData = async () => {
     console.error('❌ Error seeding data:', error.message);
   }
 };
-
-
-// //thanh toan vnpay
-
-// const {VNPay, ignoreLogger, ProductCode, VnpLocale, dateFormat} = require('vnpay');
-// app.post('/api/create-qr', (req, res)=> {
-//   const vnpay = new VNPay({
-//     tmnCode: 'KXGNPUX9',
-//     secureSecret: 'TNRN9TMNMVBJLW33HQ7ZTAV80R8Q7H8D',
-//     vnpayHost: 'https://sandbox.vnpayment.vn',
-//     testMode: true,
-//     hashAlgorithm: 'SHA512',
-//     loggerFn: ignoreLogger,
-//   })
-// })
 
 startServer();
 
