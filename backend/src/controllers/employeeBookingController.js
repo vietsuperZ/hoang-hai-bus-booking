@@ -158,6 +158,75 @@ const approvePayment = async (req, res, next) => {
   }
 };
 
+// @desc    Hủy đơn hàng
+// @route   PUT /api/employee/bookings/:id/cancel
+// @access  Private/Employee
+const cancelBooking = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  
+  try {
+    const bookingId = req.params.id;
+    const { lyDoHuy } = req.body; // Optional: Lý do hủy
+    
+    console.log('❌ Cancelling booking:', bookingId);
+
+    const booking = await Booking.findByPk(bookingId, {
+      include: [
+        {
+          model: Ticket,
+          as: 'tickets'
+        }
+      ],
+      transaction
+    });
+
+    if (!booking) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy đơn vé'
+      });
+    }
+
+    if (booking.TrangThaiTT !== 2) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Chỉ có thể hủy đơn đang chờ duyệt'
+      });
+    }
+
+    // Cập nhật trạng thái đơn hàng
+    await booking.update({
+      TrangThaiTT: 3, // Đã hủy/Hoàn tiền
+      GhiChu: lyDoHuy || 'Đơn hàng bị hủy bởi nhân viên'
+    }, { transaction });
+
+    // Hủy tất cả vé trong đơn
+    if (booking.tickets && booking.tickets.length > 0) {
+      await Ticket.update(
+        { TrangThaiVe: 2 }, // 2 = Đã hủy
+        {
+          where: { MaDon: bookingId },
+          transaction
+        }
+      );
+    }
+
+    await transaction.commit();
+
+    res.json({
+      success: true,
+      message: 'Đã hủy đơn hàng thành công'
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Error cancelling booking:', error);
+    next(error);
+  }
+};
+
 // @desc    Cập nhật trạng thái vé
 // @route   PUT /api/employee/tickets/:id/status
 // @access  Private/Employee
@@ -205,9 +274,96 @@ const updateTicketStatus = async (req, res, next) => {
   }
 };
 
+// @desc    Hủy vé đơn lẻ
+// @route   PUT /api/employee/tickets/:id/cancel
+// @access  Private/Employee
+const cancelTicket = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  
+  try {
+    const ticketId = req.params.id;
+    
+    console.log('❌ Cancelling ticket:', ticketId);
+
+    const ticket = await Ticket.findByPk(ticketId, {
+      include: [
+        {
+          model: Booking,
+          as: 'booking'
+        }
+      ],
+      transaction
+    });
+
+    if (!ticket) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy vé'
+      });
+    }
+
+    // Kiểm tra đơn hàng phải đang chờ duyệt
+    if (ticket.booking && ticket.booking.TrangThaiTT !== 2) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Chỉ có thể hủy vé của đơn đang chờ duyệt'
+      });
+    }
+
+    // Kiểm tra vé chưa bị hủy
+    if (ticket.TrangThaiVe === 2) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Vé đã bị hủy trước đó'
+      });
+    }
+
+    // Hủy vé
+    await ticket.update({
+      TrangThaiVe: 2 // Đã hủy
+    }, { transaction });
+
+    // Cập nhật lại tổng tiền đơn hàng
+    const remainingTickets = await Ticket.findAll({
+      where: {
+        MaDon: ticket.MaDon,
+        TrangThaiVe: { [sequelize.Op.ne]: 2 } // Không bị hủy
+      },
+      transaction
+    });
+
+    const newTotal = remainingTickets.reduce((sum, t) => sum + parseFloat(t.GiaVe || 0), 0);
+
+    await Booking.update(
+      { TongTien: newTotal },
+      {
+        where: { MaDon: ticket.MaDon },
+        transaction
+      }
+    );
+
+    await transaction.commit();
+
+    res.json({
+      success: true,
+      message: 'Đã hủy vé thành công'
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Error cancelling ticket:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   getAllBookings,
   getBookingDetail,
   approvePayment,
+  cancelBooking, // ← ĐỔI TÊN
+  cancelTicket, // ← THÊM MỚI
   updateTicketStatus
 };

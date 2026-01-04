@@ -7,6 +7,7 @@ const {
   cancelBooking,
   approveBooking,
   getAllBookings,
+  autoApproveBooking,
   cassoWebhook,      // THÊM
   checkPaymentStatus // THÊM
 } = require('../controllers/bookingController');
@@ -26,5 +27,6 @@ router.delete('/:id', authenticate, cancelBooking);
 // Employee/Admin routes
 router.get('/', authenticate, authorize('Admin', 'Nhân viên'), getAllBookings);
 router.put('/:id/approve', authenticate, authorize('Admin', 'Nhân viên'), approveBooking);
+router.put('/:id/auto-approve', authenticate, autoApproveBooking);
 
 module.exports = router;

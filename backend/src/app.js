@@ -74,6 +74,10 @@ const startServer = async () => {
   }
 };
 
+const refundRoutes = require('./routes/refundRoutes');
+
+app.use('/api/employee/refunds', refundRoutes);
+
 // Seed dữ liệu ban đầu
 const seedInitialData = async () => {
   try {

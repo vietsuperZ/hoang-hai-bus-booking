@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { Layout, Card, Descriptions, Form, Input, Button, Select, Row, Col, message, Spin, Modal } from 'antd';
-import { CheckCircleOutlined } from '@ant-design/icons';
+import { useState, useEffect } from 'react';
+import { Layout, Card, Descriptions, Form, Input, Button, Select, Row, Col, message, Spin, Modal, Space, Typography } from 'antd';
+import { CheckCircleOutlined, CopyOutlined, BankOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -9,10 +9,12 @@ import Footer from '../components/common/Footer';
 import SeatSelection from '../components/customer/SeatSelection';
 import tripService from '../services/tripService';
 import bookingService from '../services/bookingService';
+import api from '../services/api'; // ← THÊM IMPORT
 
 const { Content } = Layout;
 const { Option } = Select;
 const { TextArea } = Input;
+const { Title, Text, Paragraph } = Typography;
 
 const BookingPage = () => {
   const { tripId } = useParams();
@@ -24,10 +26,23 @@ const BookingPage = () => {
   const [isSuccessModalVisible, setIsSuccessModalVisible] = useState(false);
   const [bookingCode, setBookingCode] = useState('');
   
+  // STATE: Modal chuyển khoản
+  const [isTransferModalVisible, setIsTransferModalVisible] = useState(false);
+  const [transferInfo, setTransferInfo] = useState({ amount: 0, code: '' });
+  const [countdown, setCountdown] = useState(10);
+  const [selectedBooking, setSelectedBooking] = useState(null); // ← Chuyển lên đây
+  
+  // Thông tin tài khoản ngân hàng
+  const bankInfo = {
+    bankName: 'MB Bank',
+    accountNumber: '0123456789',
+    accountName: 'CONG TY TNHH XE KHACH HOANG HAI',
+    branch: 'Chi nhánh Đà Nẵng',
+    qrImage: '/images/1767528207379.png' // ← Ảnh QR thật
+  };
+  
   const [paymentMethods] = useState([
-    { id: 1, name: 'Tiền mặt' },
-    { id: 2, name: 'Chuyển khoản' },
-    { id: 3, name: 'Ví điện tử' }
+    { id: 2, name: 'Chuyển khoản' }
   ]);
 
   // Lấy thông tin chuyến xe
@@ -47,8 +62,13 @@ const BookingPage = () => {
     mutationFn: bookingService.createBooking,
     onSuccess: (response) => {
       const code = response?.data?.MaBooking || 'N/A';
+      const amount = calculateTotal();
+      
       setBookingCode(code);
-      setIsSuccessModalVisible(true);
+      setTransferInfo({ amount, code });
+      setSelectedBooking(response?.data); // ← Lưu booking data
+      setCountdown(10); // ← Reset countdown
+      setIsTransferModalVisible(true);
       
       // Reset form và seats
       form.resetFields();
@@ -99,14 +119,61 @@ const BookingPage = () => {
     bookingMutation.mutate(bookingData);
   };
 
-  // Xử lý đóng modal thành công
-  const handleSuccessModalClose = () => {
-    setIsSuccessModalVisible(false);
-    navigate('/my-bookings');
+  // Copy text
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    message.success('Đã copy!');
   };
-  const handleSuccessModalOut = () => {
-    setIsSuccessModalVisible(false);
-    navigate('/booking-page');
+
+  // Tự động duyệt thanh toán (GIẢ LẬP - Thay webhook thật)
+  const handleAutoApprove = async () => {
+    try {
+      console.log('🔥 Auto-approving:', selectedBooking?.MaDon);
+      
+      // Gọi API duyệt tự động
+      await api.put(`/bookings/${selectedBooking?.MaDon}/auto-approve`);
+      
+      message.destroy(); // Xóa message loading
+      message.success('✅ Đã nhận được thanh toán!', 3);
+      
+      setIsTransferModalVisible(false);
+      
+      // Chờ 1.5s để user đọc message rồi mới redirect
+      setTimeout(() => {
+        navigate('/my-bookings');
+      }, 1500);
+      
+    } catch (error) {
+      console.error('❌ Auto-approve error:', error);
+      message.error('Lỗi xác nhận thanh toán');
+    }
+  };
+
+  // Countdown effect - Tự động thanh toán sau 10s (GIẢ LẬP)
+  useEffect(() => {
+    let timer;
+    
+    console.log('⏱️ Countdown:', countdown, 'Modal:', isTransferModalVisible);
+    
+    if (isTransferModalVisible && countdown > 0) {
+      timer = setTimeout(() => {
+        setCountdown(countdown - 1);
+      }, 1000);
+    } else if (isTransferModalVisible && countdown === 0) {
+      // Hết thời gian → Gọi API auto-approve (GIẢ LẬP)
+      console.log('🚀 Triggering auto-approve!');
+      handleAutoApprove();
+    }
+    
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [isTransferModalVisible, countdown, selectedBooking, navigate]);
+
+  // Xử lý đóng modal chuyển khoản
+  const handleTransferModalClose = () => {
+    setIsTransferModalVisible(false);
+    navigate('/my-bookings');
   };
 
   if (tripLoading || seatsLoading) {
@@ -224,16 +291,10 @@ const BookingPage = () => {
 
                   <Form.Item
                     name="paymentMethod"
-                    label="Phương thức thanh toán"
-                    rules={[{ required: true, message: 'Vui lòng chọn phương thức thanh toán!' }]}
+                    initialValue={2}
+                    hidden
                   >
-                    <Select placeholder="Chọn phương thức">
-                      {paymentMethods.map(method => (
-                        <Option key={method.id} value={method.id}>
-                          {method.name}
-                        </Option>
-                      ))}
-                    </Select>
+                    <Input type="hidden" />
                   </Form.Item>
 
                   <Form.Item
@@ -278,57 +339,146 @@ const BookingPage = () => {
       </Content>
       <Footer />
 
-      {/* MODAL THÀNH CÔNG */}
+      {/* MODAL CHUYỂN KHOẢN */}
       <Modal
-        open={isSuccessModalVisible}
-        onCancel={handleSuccessModalOut}
-        footer={[
-          <Button 
-            key="ok" 
-            type="primary" 
-            onClick={handleSuccessModalClose}
-            size="large"
-          >
-            Xem vé của tôi
-          </Button>
-        ]}
-        width={500}
+        title={
+          <Space>
+            <BankOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
+            <span>Thông tin chuyển khoản</span>
+          </Space>
+        }
+        open={isTransferModalVisible}
+        onCancel={() => setIsTransferModalVisible(false)}
+        footer={null}
+        width={600}
         centered
         mask={false}
         maskClosable={false}
+        closable={true}
       >
-        <div style={{ textAlign: 'center', padding: '30px 20px' }}>
-          <CheckCircleOutlined 
+        <div style={{ padding: '20px 0' }}>
+          {/* Countdown Banner */}
+          <Card 
             style={{ 
-              fontSize: '80px', 
-              color: '#52c41a',
-              marginBottom: '20px'
-            }} 
-          />
-          <h2 style={{ fontSize: '24px', marginBottom: '20px', color: '#52c41a' }}>
-            Đặt vé thành công!
-          </h2>
-          <div style={{ 
-            background: '#f0f9ff', 
-            padding: '20px', 
-            borderRadius: '8px',
-            marginBottom: '15px'
-          }}>
-            <p style={{ fontSize: '14px', color: '#666', marginBottom: '10px' }}>
-              Mã đặt vé của bạn:
-            </p>
-            <p style={{ 
-              fontSize: '28px', 
-              fontWeight: 'bold', 
-              color: '#1890ff',
-              margin: 0
-            }}>
-              {bookingCode}
-            </p>
+              marginBottom: '20px', 
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              border: 'none',
+              textAlign: 'center'
+            }}
+          >
+            <div style={{ color: '#fff' }}>
+              <div style={{ fontSize: '16px', marginBottom: '5px' }}>
+                ⏱️ Đang chờ xác nhận thanh toán
+              </div>
+              <div style={{ fontSize: '32px', fontWeight: 'bold' }}>
+                {countdown}s
+              </div>
+              <div style={{ fontSize: '14px', opacity: 0.9 }}>
+                Hệ thống sẽ tự động xác nhận sau khi nhận được tiền
+              </div>
+            </div>
+          </Card>
+
+          {/* QR Code */}
+          <div style={{ textAlign: 'center', marginBottom: '30px' }}>
+            <img 
+              src={bankInfo.qrImage}
+              alt="QR Code" 
+              style={{ 
+                maxWidth: '300px',
+                width: '100%',
+                border: '2px solid #e0e0e0',
+                borderRadius: '8px',
+                padding: '10px',
+                background: '#fff'
+              }}
+              onError={(e) => {
+                console.error('QR Code load error');
+                // Tạo placeholder text thay vì load ảnh nữa
+                e.target.style.display = 'none';
+                e.target.parentElement.innerHTML += '<div style="width:300px;height:300px;border:2px dashed #ccc;display:flex;align-items:center;justify-content:center;border-radius:8px;color:#999;font-size:16px;">QR Code<br/>Chưa upload</div>';
+              }}
+            />
+            <Paragraph style={{ marginTop: '10px', color: '#666' }}>
+              Quét mã QR để chuyển khoản nhanh
+            </Paragraph>
           </div>
-          <p style={{ color: '#666', fontSize: '14px' }}>
-            Vui lòng thanh toán trong vòng 10 phút để giữ chỗ.
-          </p>
+
+          {/* Thông tin tài khoản */}
+          <Card style={{ background: '#fafafa' }}>
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <div>
+                <Text type="secondary">Ngân hàng:</Text>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Title level={5} style={{ margin: 0 }}>{bankInfo.bankName}</Title>
+                </div>
+              </div>
+
+              <div>
+                <Text type="secondary">Số tài khoản:</Text>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Title level={5} style={{ margin: 0 }}>{bankInfo.accountNumber}</Title>
+                  <Button 
+                    icon={<CopyOutlined />} 
+                    size="small"
+                    onClick={() => copyToClipboard(bankInfo.accountNumber)}
+                  >
+                    Copy
+                  </Button>
+                </div>
+              </div>
+
+              <div>
+                <Text type="secondary">Chủ tài khoản:</Text>
+                <Title level={5} style={{ margin: 0 }}>{bankInfo.accountName}</Title>
+              </div>
+
+              <div>
+                <Text type="secondary">Số tiền:</Text>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Title level={4} style={{ margin: 0, color: '#ff4d4f' }}>
+                    {formatCurrency(transferInfo.amount)}
+                  </Title>
+                  <Button 
+                    icon={<CopyOutlined />} 
+                    size="small"
+                    onClick={() => copyToClipboard(transferInfo.amount.toString())}
+                  >
+                    Copy
+                  </Button>
+                </div>
+              </div>
+
+              <div>
+                <Text type="secondary">Nội dung chuyển khoản:</Text>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Title level={5} style={{ margin: 0, color: '#1890ff' }}>
+                    DV {transferInfo.code}
+                  </Title>
+                  <Button 
+                    icon={<CopyOutlined />} 
+                    size="small"
+                    onClick={() => copyToClipboard(`DV ${transferInfo.code}`)}
+                  >
+                    Copy
+                  </Button>
+                </div>
+              </div>
+            </Space>
+          </Card>
+
+          {/* Lưu ý */}
+          <Card 
+            style={{ marginTop: '20px', background: '#fff7e6', border: '1px solid #ffd591' }}
+            size="small"
+          >
+            <Text strong style={{ color: '#d46b08' }}>⚠️ Lưu ý quan trọng:</Text>
+            <ul style={{ marginTop: '10px', paddingLeft: '20px', color: '#666' }}>
+              <li>Vui lòng chuyển <strong>ĐÚNG số tiền</strong> và <strong>ĐÚNG nội dung</strong></li>
+              <li>Hệ thống sẽ tự động xác nhận khi nhận được tiền</li>
+              <li>Nếu có vấn đề, vui lòng liên hệ: <strong>1900 xxxx</strong></li>
+            </ul>
+          </Card>
         </div>
       </Modal>
     </Layout>

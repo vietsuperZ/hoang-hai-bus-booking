@@ -8,6 +8,8 @@ const busRoutes = require('./bus.routes');
 const routeRoutes = require('./route.routes');
 const tripRoutes = require('./trip.routes');
 const bookingRoutes = require('./booking.routes');
+const employeeRoutes = require('./employeeBookingRoutes'); // ← Đúng tên file
+const refundRoutes = require('./refundRoutes');
 
 // Health check
 router.get('/', (req, res) => {
@@ -26,5 +28,7 @@ router.use('/buses', busRoutes);
 router.use('/routes', routeRoutes);
 router.use('/trips', tripRoutes);
 router.use('/bookings', bookingRoutes);
+router.use('/employee', employeeRoutes); // ← Vì file đã có /bookings trong routes
+router.use('/employee/refunds', refundRoutes);
 
 module.exports = router;

@@ -1,4 +1,5 @@
 const { Booking, Ticket, Trip, Route, Location, Bus, PaymentMethod, User } = require('../models');
+const RefundTransaction = require('../models/RefundTransaction'); // ← THÊM
 const { generateUniqueBookingCode } = require('../utils/generateBookingCode');
 const { sequelize } = require('../config/database');
 const { Op } = require('sequelize');
@@ -64,13 +65,18 @@ const createBooking = async (req, res, next) => {
     // Tạo mã booking
     const bookingCode = await generateUniqueBookingCode(Booking);
 
+    // ===== FIX: Chuyển khoản → Chờ duyệt =====
+    // MaPTTT = 2 (Chuyển khoản) → TrangThaiTT = 2 (Chờ duyệt)
+    // Khác → TrangThaiTT = 0 (Chưa thanh toán)
+    const trangThaiTT = (MaPTTT === 2) ? 2 : 0;
+
     // Tạo đơn đặt vé
     const booking = await Booking.create({
       MaNguoiDung,
       TongTien: totalAmount,
       GhiChuKhachHang,
       MaPTTT,
-      TrangThaiTT: 0, // Chưa thanh toán
+      TrangThaiTT: trangThaiTT, // ← SỬA Ở ĐÂY
       MaBooking: bookingCode
     }, { transaction });
 
@@ -235,7 +241,13 @@ const cancelBooking = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   
   try {
-    const booking = await Booking.findByPk(req.params.id, { transaction });
+    const booking = await Booking.findByPk(req.params.id, {
+      include: [{
+        model: Ticket,
+        as: 'tickets'
+      }],
+      transaction
+    });
 
     if (!booking) {
       await transaction.rollback();
@@ -254,30 +266,57 @@ const cancelBooking = async (req, res, next) => {
       });
     }
 
-    // Kiểm tra đã thanh toán chưa
-    if (booking.TrangThaiTT === 1) {
+    // Kiểm tra đã hủy chưa
+    if (booking.TrangThaiTT === 3) {
       await transaction.rollback();
       return res.status(400).json({
         success: false,
-        message: 'Không thể hủy đơn đã thanh toán. Vui lòng liên hệ nhân viên để hoàn tiền'
+        message: 'Đơn đã được hủy trước đó'
       });
     }
 
-    // XÓA HẲN VÉ ĐÃ HỦY để giải phóng ghế
-    await Ticket.destroy({
-      where: { MaDon: booking.MaDon },
-      transaction
-    });
+    // Lưu trạng thái cũ để quyết định message
+    const wasAlreadyPaid = (booking.TrangThaiTT === 1 || booking.NgayThanhToan);
+
+    // Nếu đã thanh toán → Tạo yêu cầu hoàn tiền cho từng vé
+    if (wasAlreadyPaid && booking.tickets && booking.tickets.length > 0) {
+      for (const ticket of booking.tickets) {
+        // Tạo yêu cầu hoàn tiền
+        await RefundTransaction.create({
+          MaVe: ticket.MaVe,
+          SoTienHoan: ticket.GiaVe,
+          TrangThai: 0, // Chờ xử lý
+          GhiChu: `Yêu cầu hoàn tiền cho đơn ${booking.MaBooking}`
+        }, { transaction });
+      }
+    }
+
+    // Cập nhật trạng thái đơn
+    await booking.update({
+      TrangThaiTT: 3 // Đã hủy/hoàn tiền
+    }, { transaction });
+
+    // Hủy tất cả vé
+    await Ticket.update(
+      { TrangThaiVe: 2 }, // Đã hủy
+      { where: { MaDon: booking.MaDon }, transaction }
+    );
 
     await transaction.commit();
 
+    // Message khác nhau tùy đã thanh toán hay chưa
+    const message = wasAlreadyPaid
+      ? 'Đã gửi yêu cầu hoàn tiền. Vui lòng liên hệ nhân viên để xác nhận.'
+      : 'Đã hủy đơn đặt vé thành công';
+
     res.status(200).json({
       success: true,
-      message: 'Hủy đơn đặt vé thành công'
+      message: message
     });
 
   } catch (error) {
     await transaction.rollback();
+    console.error('❌ Cancel booking error:', error);
     next(error);
   }
 };
@@ -506,6 +545,66 @@ const checkPaymentStatus = async (req, res, next) => {
 
 
 
+// @desc    Tự động duyệt thanh toán (GIẢ LẬP - Thay webhook)
+// @route   PUT /api/bookings/:id/auto-approve
+// @access  Private
+const autoApproveBooking = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  
+  try {
+    const booking = await Booking.findByPk(req.params.id, { transaction });
+
+    if (!booking) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy đơn đặt vé'
+      });
+    }
+
+    // Kiểm tra quyền (chỉ owner mới được)
+    if (booking.MaNguoiDung !== req.user.MaNguoiDung) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Không có quyền'
+      });
+    }
+
+    // Kiểm tra trạng thái
+    if (booking.TrangThaiTT !== 2) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Đơn không ở trạng thái chờ duyệt'
+      });
+    }
+
+    // Cập nhật trạng thái → Đã thanh toán
+    await booking.update({ 
+      TrangThaiTT: 1,
+      NgayThanhToan: new Date()
+    }, { transaction });
+
+    // Cập nhật vé
+    await Ticket.update(
+      { TrangThaiVe: 0 }, // Chưa sử dụng (chờ lên xe)
+      { where: { MaDon: booking.MaDon }, transaction }
+    );
+
+    await transaction.commit();
+
+    res.status(200).json({
+      success: true,
+      message: 'Xác nhận thanh toán thành công'
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    next(error);
+  }
+};
+
 module.exports = {
   cassoWebhook,
   checkPaymentStatus,
@@ -514,5 +613,6 @@ module.exports = {
   getBookingById,
   cancelBooking,
   approveBooking,
+  autoApproveBooking, // ← THÊM MỚI
   getAllBookings
 };
