@@ -1,4 +1,4 @@
-const { User, Role } = require('../models');
+const { sequelize } = require('../config/database');
 const bcrypt = require('bcryptjs');
 
 // @desc    Cập nhật thông tin cá nhân
@@ -6,7 +6,7 @@ const bcrypt = require('bcryptjs');
 // @access  Private
 const updateProfile = async (req, res, next) => {
   try {
-    const { HoTen, SDT, Email, GioiTinh, NgaySinh, Avatar } = req.body;
+    const { HoTen, SDT, Email } = req.body; // ← CHỈ LẤY 3 TRƯỜNG
     const userId = req.user.MaNguoiDung;
 
     console.log('✏️ Updating profile:', userId);
@@ -19,55 +19,87 @@ const updateProfile = async (req, res, next) => {
       });
     }
 
-    // Tìm user
-    const user = await User.findByPk(userId);
-
-    if (!user) {
-      return res.status(404).json({
+    // Validate phone
+    const phoneRegex = /^[0-9]{10,11}$/;
+    if (!phoneRegex.test(SDT)) {
+      return res.status(400).json({
         success: false,
-        message: 'Không tìm thấy người dùng'
+        message: 'Số điện thoại không hợp lệ (10-11 chữ số)'
       });
     }
 
-    // Kiểm tra email mới có trùng với user khác không
-    if (Email !== user.Email) {
-      const existingUser = await User.findOne({
-        where: {
-          Email: Email.toLowerCase(),
-          MaNguoiDung: { [require('sequelize').Op.ne]: userId }
-        }
+    // Validate email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(Email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email không hợp lệ'
       });
+    }
 
-      if (existingUser) {
-        return res.status(400).json({
-          success: false,
-          message: 'Email đã được sử dụng bởi tài khoản khác'
-        });
+    // Kiểm tra email trùng
+    const [existingUser] = await sequelize.query(
+      'SELECT MaNguoiDung FROM NguoiDung WHERE LOWER(Email) = LOWER(?) AND MaNguoiDung != ?',
+      {
+        replacements: [Email.trim(), userId],
+        type: sequelize.QueryTypes.SELECT
       }
+    );
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email đã được sử dụng bởi tài khoản khác'
+      });
     }
 
-    // Cập nhật
-    await user.update({
-      HoTen: HoTen.trim(),
-      SDT: SDT.trim(),
-      Email: Email.toLowerCase().trim(),
-      GioiTinh: GioiTinh || null,
-      NgaySinh: NgaySinh || null,
-      Avatar: Avatar || null
-    });
+    // ===== CẬP NHẬT CHỈ 3 CỘT CÓ SẴN =====
+    await sequelize.query(
+      'UPDATE NguoiDung SET HoTen = ?, SDT = ?, Email = ? WHERE MaNguoiDung = ?',
+      {
+        replacements: [
+          HoTen.trim(), 
+          SDT.trim(), 
+          Email.toLowerCase().trim(), 
+          userId
+        ],
+        type: sequelize.QueryTypes.UPDATE
+      }
+    );
 
-    // Lấy user với roles
-    const updatedUser = await User.findByPk(userId, {
-      include: [{
-        model: Role,
-        as: 'roles',
-        attributes: ['MaVaiTro', 'TenVaiTro'],
-        through: { attributes: [] }
-      }],
-      attributes: { exclude: ['MatKhau'] }
-    });
+    // Lấy user sau update
+    const [updatedUser] = await sequelize.query(
+      `SELECT 
+        u.MaNguoiDung, 
+        u.HoTen, 
+        u.Email, 
+        u.SDT, 
+        u.TrangThai,
+        u.createdAt,
+        u.updatedAt
+      FROM NguoiDung u
+      WHERE u.MaNguoiDung = ?`,
+      {
+        replacements: [userId],
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
 
-    console.log('✅ Profile updated');
+    // Lấy roles
+    const roles = await sequelize.query(
+      `SELECT vt.MaVaiTro, vt.TenVaiTro
+       FROM NguoiDung_VaiTro nvt
+       JOIN VaiTro vt ON nvt.MaVaiTro = vt.MaVaiTro
+       WHERE nvt.MaNguoiDung = ?`,
+      {
+        replacements: [userId],
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+
+    updatedUser.roles = roles;
+
+    console.log('✅ Profile updated successfully');
 
     res.json({
       success: true,
@@ -91,7 +123,6 @@ const changePassword = async (req, res, next) => {
 
     console.log('🔐 Changing password:', userId);
 
-    // Validate
     if (!MatKhauCu || !MatKhauMoi) {
       return res.status(400).json({
         success: false,
@@ -106,8 +137,13 @@ const changePassword = async (req, res, next) => {
       });
     }
 
-    // Tìm user (include password)
-    const user = await User.findByPk(userId);
+    const [user] = await sequelize.query(
+      'SELECT * FROM NguoiDung WHERE MaNguoiDung = ?',
+      {
+        replacements: [userId],
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
 
     if (!user) {
       return res.status(404).json({
@@ -116,8 +152,7 @@ const changePassword = async (req, res, next) => {
       });
     }
 
-    // Kiểm tra mật khẩu cũ
-    const isMatch = await user.comparePassword(MatKhauCu);
+    const isMatch = await bcrypt.compare(MatKhauCu, user.MatKhau);
     
     if (!isMatch) {
       return res.status(400).json({
@@ -126,12 +161,18 @@ const changePassword = async (req, res, next) => {
       });
     }
 
-    // Cập nhật mật khẩu mới (sẽ tự động hash bởi hook beforeUpdate)
-    await user.update({
-      MatKhau: MatKhauMoi
-    });
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(MatKhauMoi, salt);
 
-    console.log('✅ Password changed');
+    await sequelize.query(
+      'UPDATE NguoiDung SET MatKhau = ? WHERE MaNguoiDung = ?',
+      {
+        replacements: [hashedPassword, userId],
+        type: sequelize.QueryTypes.UPDATE
+      }
+    );
+
+    console.log('✅ Password changed successfully');
 
     res.json({
       success: true,

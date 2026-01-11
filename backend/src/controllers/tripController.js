@@ -285,7 +285,71 @@ const deleteTrip = async (req, res, next) => {
     next(error);
   }
 };
+// @desc    Lấy danh sách hành khách của chuyến
+// @route   GET /api/trips/:id/passengers
+// @access  Private/Employee/Admin
+const getTripPassengers = async (req, res, next) => {
+  try {
+    const tripId = req.params.id;
+    
+    console.log('👥 Fetching passengers for trip:', tripId);
 
+    const trip = await Trip.findByPk(tripId, {
+      include: [
+        {
+          model: Route,
+          as: 'route',
+          include: [
+            { model: Location, as: 'diemDi' },
+            { model: Location, as: 'diemDen' }
+          ]
+        },
+        {
+          model: Bus,
+          as: 'bus'
+        }
+      ]
+    });
+
+    if (!trip) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy chuyến xe'
+      });
+    }
+
+    // Lấy danh sách vé đã thanh toán
+    const tickets = await Ticket.findAll({
+      where: {
+        MaChuyen: tripId,
+        TrangThaiVe: [0, 1] // Chưa sử dụng hoặc đã thanh toán
+      },
+      include: [
+        {
+          model: Booking,
+          as: 'booking',
+          where: {
+            TrangThaiTT: [1, 2] // Đã thanh toán hoặc chờ duyệt
+          },
+          required: true
+        }
+      ],
+      order: [['MaGhe', 'ASC']]
+    });
+
+    res.json({
+      success: true,
+      data: {
+        trip,
+        tickets
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching passengers:', error);
+    next(error);
+  }
+};
 module.exports = {
   searchTrips,
   getAllTrips,
@@ -293,5 +357,6 @@ module.exports = {
   getTripSeats,
   createTrip,
   updateTrip,
-  deleteTrip
+  deleteTrip,
+  getTripPassengers
 };

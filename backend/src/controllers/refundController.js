@@ -60,9 +60,19 @@ const processRefund = async (req, res, next) => {
   
   try {
     const refundId = req.params.id;
-    const employeeId = req.user.employeeId; // Lấy từ token
+    const employeeId = req.user.employeeId;
 
-    const refund = await RefundTransaction.findByPk(refundId, { transaction });
+    const refund = await RefundTransaction.findByPk(refundId, {
+      include: [{
+        model: Ticket,
+        as: 'ticket',
+        include: [{
+          model: Booking,
+          as: 'booking'
+        }]
+      }],
+      transaction
+    });
 
     if (!refund) {
       await transaction.rollback();
@@ -80,12 +90,34 @@ const processRefund = async (req, res, next) => {
       });
     }
 
-    // Cập nhật trạng thái
+    // 1. Cập nhật refund
     await refund.update({
-      TrangThai: 1, // Đã hoàn
+      TrangThai: 1,
       NhanVienXuLy_ID: employeeId,
       NgayHoanTien: new Date()
     }, { transaction });
+
+    // 2. ===== CẬP NHẬT BOOKING: 4 → 5 (Đã hoàn tiền) =====
+    const booking = refund.ticket?.booking;
+    if (booking && booking.TrangThaiTT === 4) {
+      // Check xem tất cả vé đã được hoàn chưa
+      const allRefunds = await RefundTransaction.findAll({
+        include: [{
+          model: Ticket,
+          as: 'ticket',
+          where: { MaDon: booking.MaDon }
+        }],
+        transaction
+      });
+
+      const allProcessed = allRefunds.every(r => r.TrangThai === 1);
+
+      if (allProcessed) {
+        await booking.update({
+          TrangThaiTT: 5 // Đã hoàn tiền
+        }, { transaction });
+      }
+    }
 
     await transaction.commit();
 

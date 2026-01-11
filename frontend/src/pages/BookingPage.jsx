@@ -131,7 +131,7 @@ const BookingPage = () => {
       console.log('🔥 Auto-approving:', selectedBooking?.MaDon);
       
       // Gọi API duyệt tự động
-      await api.put(`/bookings/${selectedBooking?.MaDon}/auto-approve`);
+      // await api.put(`/bookings/${selectedBooking?.MaDon}/auto-approve`);
       
       message.destroy(); // Xóa message loading
       message.success('✅ Đã nhận được thanh toán!', 3);
@@ -370,9 +370,9 @@ const BookingPage = () => {
               <div style={{ fontSize: '16px', marginBottom: '5px' }}>
                 ⏱️ Đang chờ xác nhận thanh toán
               </div>
-              <div style={{ fontSize: '32px', fontWeight: 'bold' }}>
+              {/* <div style={{ fontSize: '32px', fontWeight: 'bold' }}>
                 {countdown}s
-              </div>
+              </div> */}
               <div style={{ fontSize: '14px', opacity: 0.9 }}>
                 Hệ thống sẽ tự động xác nhận sau khi nhận được tiền
               </div>

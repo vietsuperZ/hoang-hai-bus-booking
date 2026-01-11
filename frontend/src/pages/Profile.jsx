@@ -1,6 +1,12 @@
 import { useState } from 'react';
 import { Layout, Card, Descriptions, Button, Modal, Form, Input, message, Space } from 'antd';
-import { EditOutlined, LockOutlined, UserOutlined, PhoneOutlined } from '@ant-design/icons';
+import { 
+  EditOutlined, 
+  LockOutlined, 
+  UserOutlined, 
+  PhoneOutlined, 
+  MailOutlined 
+} from '@ant-design/icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { useMutation } from '@tanstack/react-query';
 import Header from '../components/common/Header';
@@ -19,28 +25,27 @@ const Profile = () => {
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [isPasswordModalVisible, setIsPasswordModalVisible] = useState(false);
 
-  // Mutation cập nhật thông tin
   const updateProfileMutation = useMutation({
     mutationFn: async (data) => {
       const response = await api.put('/auth/profile', data);
-      return response.data;
+      return response;
     },
-    onSuccess: (data) => {
+    onSuccess: (response) => {
       message.success('Cập nhật thông tin thành công!');
-      dispatch(setUser(data.data));
-      localStorage.setItem('user', JSON.stringify(data.data));
+      const userData = response?.data || response;
+      dispatch(setUser(userData));
+      localStorage.setItem('user', JSON.stringify(userData));
       setIsEditModalVisible(false);
     },
     onError: (error) => {
-      message.error(error?.response?.data?.message || 'Cập nhật thất bại!');
+      message.error(error?.message || 'Cập nhật thất bại!');
     }
   });
 
-  // Mutation đổi mật khẩu
   const changePasswordMutation = useMutation({
     mutationFn: async (data) => {
       const response = await api.put('/auth/change-password', data);
-      return response.data;
+      return response;
     },
     onSuccess: () => {
       message.success('Đổi mật khẩu thành công!');
@@ -48,31 +53,45 @@ const Profile = () => {
       passwordForm.resetFields();
     },
     onError: (error) => {
-      message.error(error?.response?.data?.message || 'Đổi mật khẩu thất bại!');
+      message.error(error?.message || 'Đổi mật khẩu thất bại!');
     }
   });
 
-  // Mở modal chỉnh sửa
   const handleEdit = () => {
     form.setFieldsValue({
       HoTen: user?.HoTen,
+      Email: user?.Email,
       SDT: user?.SDT
     });
     setIsEditModalVisible(true);
   };
 
-  // Submit cập nhật thông tin
   const handleUpdateProfile = (values) => {
-    updateProfileMutation.mutate(values);
+    updateProfileMutation.mutate({
+      HoTen: values.HoTen,
+      SDT: values.SDT,
+      Email: user?.Email
+    });
   };
 
-  // Submit đổi mật khẩu
   const handleChangePassword = (values) => {
     changePasswordMutation.mutate({
       MatKhauCu: values.MatKhauCu,
       MatKhauMoi: values.MatKhauMoi
     });
   };
+
+  if (!user) {
+    return (
+      <Layout style={{ minHeight: '100vh' }}>
+        <Header />
+        <Content style={{ padding: '50px', textAlign: 'center' }}>
+          <p>Đang tải...</p>
+        </Content>
+        <Footer />
+      </Layout>
+    );
+  }
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -83,48 +102,36 @@ const Profile = () => {
             title="Thông tin cá nhân"
             extra={
               <Space>
-                <Button
-                  type="primary"
-                  icon={<EditOutlined />}
-                  onClick={handleEdit}
-                >
+                <Button type="primary" icon={<EditOutlined />} onClick={handleEdit}>
                   Chỉnh sửa
                 </Button>
-                <Button
-                  icon={<LockOutlined />}
-                  onClick={() => setIsPasswordModalVisible(true)}
-                >
+                <Button icon={<LockOutlined />} onClick={() => setIsPasswordModalVisible(true)}>
                   Đổi mật khẩu
                 </Button>
               </Space>
             }
           >
             <Descriptions bordered column={1}>
-              <Descriptions.Item label="Họ và tên">{user?.HoTen}</Descriptions.Item>
-              <Descriptions.Item label="Email">{user?.Email}</Descriptions.Item>
-              <Descriptions.Item label="Số điện thoại">{user?.SDT}</Descriptions.Item>
+              <Descriptions.Item label="Họ và tên">{user?.HoTen || 'N/A'}</Descriptions.Item>
+              <Descriptions.Item label="Email">{user?.Email || 'N/A'}</Descriptions.Item>
+              <Descriptions.Item label="Số điện thoại">{user?.SDT || 'N/A'}</Descriptions.Item>
             </Descriptions>
           </Card>
         </div>
       </Content>
       <Footer />
 
-      {/* Modal Chỉnh sửa thông tin */}
       <Modal
         title="✏️ Chỉnh sửa thông tin cá nhân"
         open={isEditModalVisible}
         onCancel={() => setIsEditModalVisible(false)}
         footer={null}
         width={500}
+        mask={false}              // ← THÊM
+  maskClosable={false}
         destroyOnClose
-        mask={false}
-        maskClosable={false}
       >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleUpdateProfile}
-        >
+        <Form form={form} layout="vertical" onFinish={handleUpdateProfile}>
           <Form.Item
             name="HoTen"
             label="Họ và tên"
@@ -133,9 +140,14 @@ const Profile = () => {
               { min: 3, message: 'Họ tên phải từ 3 ký tự!' }
             ]}
           >
+            <Input prefix={<UserOutlined />} placeholder="Nhập họ và tên" />
+          </Form.Item>
+
+          <Form.Item name="Email" label="Email">
             <Input 
-              prefix={<UserOutlined />}
-              placeholder="Nhập họ và tên"
+              prefix={<MailOutlined />} 
+              disabled 
+              style={{ color: '#000', backgroundColor: '#f5f5f5' }} 
             />
           </Form.Item>
 
@@ -144,26 +156,16 @@ const Profile = () => {
             label="Số điện thoại"
             rules={[
               { required: true, message: 'Vui lòng nhập số điện thoại!' },
-              { pattern: /^0\d{9}$/, message: 'Số điện thoại không hợp lệ!' }
+              { pattern: /^0\d{9,10}$/, message: 'Số điện thoại không hợp lệ!' }
             ]}
           >
-            <Input 
-              prefix={<PhoneOutlined />}
-              placeholder="0987654321"
-              maxLength={10}
-            />
+            <Input prefix={<PhoneOutlined />} placeholder="0987654321" maxLength={11} />
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={() => setIsEditModalVisible(false)}>
-                Hủy
-              </Button>
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={updateProfileMutation.isPending}
-              >
+              <Button onClick={() => setIsEditModalVisible(false)}>Hủy</Button>
+              <Button type="primary" htmlType="submit" loading={updateProfileMutation.isPending}>
                 Cập nhật
               </Button>
             </Space>
@@ -171,7 +173,6 @@ const Profile = () => {
         </Form>
       </Modal>
 
-      {/* Modal Đổi mật khẩu */}
       <Modal
         title="🔐 Đổi mật khẩu"
         open={isPasswordModalVisible}
@@ -179,25 +180,16 @@ const Profile = () => {
         footer={null}
         width={500}
         destroyOnClose
-        mask={false}
-        maskClosable={false}
+        mask={false}              // ← THÊM
+  maskClosable={false}
       >
-        <Form
-          form={passwordForm}
-          layout="vertical"
-          onFinish={handleChangePassword}
-        >
+        <Form form={passwordForm} layout="vertical" onFinish={handleChangePassword}>
           <Form.Item
             name="MatKhauCu"
             label="Mật khẩu hiện tại"
-            rules={[
-              { required: true, message: 'Vui lòng nhập mật khẩu hiện tại!' }
-            ]}
+            rules={[{ required: true, message: 'Vui lòng nhập mật khẩu hiện tại!' }]}
           >
-            <Input.Password 
-              prefix={<LockOutlined />}
-              placeholder="Nhập mật khẩu hiện tại"
-            />
+            <Input.Password prefix={<LockOutlined />} placeholder="Nhập mật khẩu hiện tại" />
           </Form.Item>
 
           <Form.Item
@@ -208,10 +200,7 @@ const Profile = () => {
               { min: 6, message: 'Mật khẩu phải từ 6 ký tự!' }
             ]}
           >
-            <Input.Password 
-              prefix={<LockOutlined />}
-              placeholder="Nhập mật khẩu mới"
-            />
+            <Input.Password prefix={<LockOutlined />} placeholder="Nhập mật khẩu mới" />
           </Form.Item>
 
           <Form.Item
@@ -230,22 +219,13 @@ const Profile = () => {
               }),
             ]}
           >
-            <Input.Password 
-              prefix={<LockOutlined />}
-              placeholder="Nhập lại mật khẩu mới"
-            />
+            <Input.Password prefix={<LockOutlined />} placeholder="Nhập lại mật khẩu mới" />
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={() => setIsPasswordModalVisible(false)}>
-                Hủy
-              </Button>
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={changePasswordMutation.isPending}
-              >
+              <Button onClick={() => setIsPasswordModalVisible(false)}>Hủy</Button>
+              <Button type="primary" htmlType="submit" loading={changePasswordMutation.isPending}>
                 Đổi mật khẩu
               </Button>
             </Space>

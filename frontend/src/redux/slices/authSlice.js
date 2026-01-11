@@ -1,11 +1,23 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import authService from '../../services/authService';
 
-// Lấy user từ localStorage
-const user = authService.getCurrentUser();
+// ===== FIX: LẤY USER AN TOÀN =====
+const getUserFromStorage = () => {
+  try {
+    const userStr = localStorage.getItem('user');
+    if (!userStr || userStr === 'undefined' || userStr === 'null') {
+      return null;
+    }
+    return JSON.parse(userStr);
+  } catch (error) {
+    console.error('❌ Error loading user from storage:', error);
+    localStorage.removeItem('user');
+    return null;
+  }
+};
 
 const initialState = {
-  user: user,
+  user: getUserFromStorage(), // ← Dùng function an toàn
   isAuthenticated: authService.isAuthenticated(),
   loading: false,
   error: null,
@@ -48,8 +60,16 @@ const authSlice = createSlice({
       state.error = null;
     },
     setUser: (state, action) => {
-      state.user = action.payload;
-      state.isAuthenticated = true;
+      const userData = action.payload;
+      
+      // ===== FIX: KIỂM TRA TRƯỚC KHI LƯU =====
+      if (userData && userData.MaNguoiDung) {
+        state.user = userData;
+        state.isAuthenticated = true;
+        localStorage.setItem('user', JSON.stringify(userData));
+      } else {
+        console.error('❌ Invalid user data:', userData);
+      }
     },
   },
   extraReducers: (builder) => {

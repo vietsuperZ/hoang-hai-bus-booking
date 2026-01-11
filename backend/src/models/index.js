@@ -14,6 +14,7 @@ const PaymentMethod = require('./PaymentMethod');
 const Booking = require('./Booking');
 const Ticket = require('./Ticket');
 
+
 // ==================== RELATIONSHIPS ====================
 
 // User - Role (Many-to-Many qua UserRole)

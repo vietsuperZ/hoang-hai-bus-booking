@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConfigProvider } from 'antd';
 import viVN from 'antd/locale/vi_VN';
 import store from './redux/store';
-
+import DriverDashboard from './pages/DriverDashboard';
+import ProtectedRoute from './components/common/ProtectedRoute';
 // Pages
 import Home from './pages/Home';
 import Login from './pages/Login';
@@ -80,7 +81,11 @@ function App() {
                   </PrivateRoute>
                 }
               />
-
+              <Route path="/driver" element={
+  <ProtectedRoute allowedRoles={['Tài xế']}>
+    <DriverDashboard />
+  </ProtectedRoute>
+} />
               {/* Employee route */}
               <Route
                 path="/employee"

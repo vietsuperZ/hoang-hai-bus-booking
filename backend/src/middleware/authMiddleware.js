@@ -1,58 +1,65 @@
-const { verifyAccessToken } = require('../config/jwt');
-const { User, Role } = require('../models');
+const jwt = require('jsonwebtoken');
+const { sequelize } = require('../config/database');
 
-// Middleware xác thực JWT
 const authenticate = async (req, res, next) => {
   try {
-    // Lấy token từ header
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const token = req.headers.authorization?.split(' ')[1];
+
+    if (!token) {
       return res.status(401).json({
         success: false,
         message: 'Không tìm thấy token xác thực'
       });
     }
 
-    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Verify token
-    const decoded = verifyAccessToken(token);
-
-    // Lấy thông tin user từ database
-    const user = await User.findByPk(decoded.MaNguoiDung, {
-      include: [{
-        model: Role,
-        as: 'roles',
-        attributes: ['MaVaiTro', 'TenVaiTro'],
-        through: { attributes: [] }
-      }],
-      attributes: { exclude: ['MatKhau'] }
-    });
+    // ===== DÙNG RAW QUERY THAY VÌ User.findByPk =====
+    const [user] = await sequelize.query(
+      `SELECT 
+        u.MaNguoiDung, 
+        u.HoTen, 
+        u.Email, 
+        u.SDT, 
+        u.TrangThai,
+        u.createdAt,
+        u.updatedAt
+      FROM NguoiDung u
+      WHERE u.MaNguoiDung = ?`,
+      {
+        replacements: [decoded.MaNguoiDung],
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
 
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: 'Người dùng không tồn tại'
+        message: 'Token không hợp lệ'
       });
     }
 
-    if (user.TrangThai === 0) {
-      return res.status(403).json({
-        success: false,
-        message: 'Tài khoản của bạn đã bị khóa'
-      });
-    }
+    // Lấy roles riêng
+    const roles = await sequelize.query(
+      `SELECT vt.MaVaiTro, vt.TenVaiTro
+       FROM NguoiDung_VaiTro nvt
+       JOIN VaiTro vt ON nvt.MaVaiTro = vt.MaVaiTro
+       WHERE nvt.MaNguoiDung = ?`,
+      {
+        replacements: [decoded.MaNguoiDung],
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
 
-    // Gán user vào request
+    user.roles = roles;
     req.user = user;
     next();
 
   } catch (error) {
+    console.error('Auth middleware error:', error);
     return res.status(401).json({
       success: false,
-      message: 'Token không hợp lệ hoặc đã hết hạn',
-      error: error.message
+      message: 'Token không hợp lệ hoặc đã hết hạn'
     });
   }
 };

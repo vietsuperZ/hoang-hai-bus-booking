@@ -8,7 +8,6 @@ const register = async (req, res, next) => {
   try {
     const { HoTen, Email, MatKhau, SDT } = req.body;
 
-    // Kiểm tra email đã tồn tại
     const existingUser = await User.findOne({ where: { Email } });
     if (existingUser) {
       return res.status(400).json({
@@ -17,7 +16,6 @@ const register = async (req, res, next) => {
       });
     }
 
-    // Tạo user mới
     const user = await User.create({
       HoTen,
       Email,
@@ -26,21 +24,17 @@ const register = async (req, res, next) => {
       TrangThai: 1
     });
 
-    // Tìm vai trò "Khách hàng"
     let customerRole = await Role.findOne({ where: { TenVaiTro: 'Khách hàng' } });
     
-    // Nếu chưa có, tạo mới
     if (!customerRole) {
       customerRole = await Role.create({ TenVaiTro: 'Khách hàng' });
     }
 
-    // Gán vai trò "Khách hàng" cho user
     await UserRole.create({
       MaNguoiDung: user.MaNguoiDung,
       MaVaiTro: customerRole.MaVaiTro
     });
 
-    // Lấy user với roles
     const userWithRoles = await User.findByPk(user.MaNguoiDung, {
       include: [{
         model: Role,
@@ -51,7 +45,6 @@ const register = async (req, res, next) => {
       attributes: { exclude: ['MatKhau'] }
     });
 
-    // Tạo token
     const accessToken = generateAccessToken({
       MaNguoiDung: user.MaNguoiDung,
       Email: user.Email
@@ -85,16 +78,13 @@ const login = async (req, res, next) => {
 
     console.log('🔐 Login attempt:', Email);
 
-    // Validate input
     if (!Email || !MatKhau) {
-      console.log('❌ Missing credentials');
       return res.status(400).json({
         success: false,
         message: 'Vui lòng nhập email và mật khẩu'
       });
     }
 
-    // Tìm user theo email (include password để so sánh)
     const user = await User.findOne({ 
       where: { Email },
       include: [{
@@ -106,42 +96,28 @@ const login = async (req, res, next) => {
     });
 
     if (!user) {
-      console.log('❌ User not found:', Email);
       return res.status(401).json({
         success: false,
         message: 'Email hoặc mật khẩu không chính xác'
       });
     }
 
-    console.log('✅ User found:', user.Email);
-    console.log('👤 User roles:', user.roles?.map(r => r.TenVaiTro));
-    console.log('📊 User status:', user.TrangThai);
-
-    // Kiểm tra tài khoản có bị khóa không
     if (user.TrangThai === 0) {
-      console.log('❌ Account locked');
       return res.status(403).json({
         success: false,
         message: 'Tài khoản của bạn đã bị khóa'
       });
     }
 
-    // So sánh mật khẩu
-    console.log('🔑 Comparing password...');
     const isPasswordValid = await user.comparePassword(MatKhau);
-    console.log('🔑 Password valid:', isPasswordValid);
     
     if (!isPasswordValid) {
-      console.log('❌ Wrong password');
       return res.status(401).json({
         success: false,
         message: 'Email hoặc mật khẩu không chính xác'
       });
     }
 
-    console.log('✅ Generating tokens...');
-
-    // Tạo token
     const accessToken = generateAccessToken({
       MaNguoiDung: user.MaNguoiDung,
       Email: user.Email
@@ -151,7 +127,6 @@ const login = async (req, res, next) => {
       MaNguoiDung: user.MaNguoiDung
     });
 
-    // Loại bỏ password khỏi response
     const userResponse = user.toJSON();
 
     console.log('✅ Login successful!');
@@ -191,9 +166,6 @@ const getMe = async (req, res, next) => {
 // @access  Private
 const logout = async (req, res, next) => {
   try {
-    // Trong thực tế, bạn có thể lưu refresh token vào database
-    // và xóa nó khi logout, hoặc dùng Redis để blacklist token
-    
     res.status(200).json({
       success: true,
       message: 'Đăng xuất thành công'

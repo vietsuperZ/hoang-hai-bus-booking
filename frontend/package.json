@@ -16,13 +16,15 @@
     "antd": "^5.28.1",
     "axios": "^1.13.2",
     "dayjs": "^1.11.19",
+    "file-saver": "^2.0.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-redux": "^9.2.0",
     "react-router-dom": "^7.9.6",
     "recharts": "^3.6.0",
     "socket.io-client": "^4.8.1",
-    "vnpay": "^2.4.4"
+    "vnpay": "^2.4.4",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

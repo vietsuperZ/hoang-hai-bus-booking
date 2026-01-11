@@ -21,8 +21,10 @@ const EmployeeDashboard = () => {
   const [isApproveModalVisible, setIsApproveModalVisible] = useState(false);
   const [isCancelModalVisible, setIsCancelModalVisible] = useState(false);
   const [isCancelTicketModalVisible, setIsCancelTicketModalVisible] = useState(false);
+  const [isApproveCancelModalVisible, setIsApproveCancelModalVisible] = useState(false);
   const [pendingBookingId, setPendingBookingId] = useState(null);
   const [pendingTicketId, setPendingTicketId] = useState(null);
+  const [pendingCancelBookingId, setPendingCancelBookingId] = useState(null);
   const [filters, setFilters] = useState({
     status: 'all',
     search: ''
@@ -73,32 +75,109 @@ const EmployeeDashboard = () => {
     }
   });
 
-  // Mutation hủy vé đơn lẻ
-  const cancelTicketMutation = useMutation({
-    mutationFn: async (ticketId) => {
-      const response = await api.put(`/employee/tickets/${ticketId}/cancel`);
+  // ===== MUTATION DUYỆT HỦY VỚI AUTO REFUND SAU 10S =====
+  const approveCancellationMutation = useMutation({
+    mutationFn: async (bookingId) => {
+      const response = await api.put(`/bookings/${bookingId}/approve-cancel`);
       return response.data;
     },
-    onSuccess: () => {
-      message.success('Đã hủy vé thành công!');
+    onSuccess: (data, bookingId) => {
+      message.success('Đã duyệt hủy vé thành công!');
+      
+      // Hiện thông báo đang xử lý hoàn tiền
+      const loadingMessage = message.loading('⏳ Đang xử lý hoàn tiền... (10 giây)', 0);
+      
+      // Đếm ngược
+      let countdown = 10;
+      const countdownInterval = setInterval(() => {
+        countdown--;
+        if (countdown > 0) {
+          message.loading(`⏳ Đang xử lý hoàn tiền... (${countdown} giây)`, 0);
+        }
+      }, 1000);
+      
+      // Sau 10s: Gọi API hoàn tiền
+      setTimeout(async () => {
+        clearInterval(countdownInterval);
+        loadingMessage();
+        
+        try {
+          // Gọi API hoàn tiền (giả lập - thực tế là backend tự động)
+          await api.put(`/bookings/${bookingId}/complete-refund`);
+          
+          message.success('✅ Đã hoàn tiền thành công!', 3);
+          queryClient.invalidateQueries(['employee-bookings']);
+        } catch (error) {
+          message.error('❌ Lỗi khi hoàn tiền: ' + (error?.response?.data?.message || 'Vui lòng thử lại'));
+        }
+      }, 10000);
+      
       queryClient.invalidateQueries(['employee-bookings']);
-      // Reload booking detail
-      if (selectedBooking) {
-        api.get(`/employee/bookings/${selectedBooking.MaDon}`)
-          .then(res => setSelectedBooking(res.data.data))
-          .catch(err => console.error(err));
-      }
+      setIsDrawerVisible(false);
+      setSelectedBooking(null);
     },
     onError: (error) => {
-      message.error(error?.response?.data?.message || 'Hủy vé thất bại!');
+      message.error(error?.response?.data?.message || 'Duyệt hủy thất bại!');
     }
   });
+
+  // Duyệt hủy
+  const handleApproveCancellation = (bookingId) => {
+    setPendingCancelBookingId(bookingId);
+    setIsApproveCancelModalVisible(true);
+  };
+
+  const confirmApproveCancellation = () => {
+    approveCancellationMutation.mutate(pendingCancelBookingId);
+    setIsApproveCancelModalVisible(false);
+    setPendingCancelBookingId(null);
+  };
+
+  // Mutation hủy vé đơn lẻ
+  // Mutation hủy vé đơn lẻ
+const cancelTicketMutation = useMutation({
+  mutationFn: async (ticketId) => {
+    const response = await api.put(`/employee/tickets/${ticketId}/cancel`);
+    console.log('🎫 Cancel ticket response:', response);
+    return { ticketId, response };
+  },
+  onSuccess: ({ ticketId, response }) => {
+    message.success('Đã hủy vé thành công!');
+    
+    // Cập nhật local state
+    if (selectedBooking && selectedBooking.tickets) {
+      // Đánh dấu vé đã hủy
+      const updatedTickets = selectedBooking.tickets.map(ticket => 
+        ticket.MaVe === ticketId 
+          ? { ...ticket, TrangThaiVe: 2 }
+          : ticket
+      );
+      
+      // Cập nhật tổng tiền nếu có trong response
+      const newTotal = response?.data?.newTotal || response?.newTotal || selectedBooking.TongTien;
+      
+      setSelectedBooking({
+        ...selectedBooking,
+        tickets: updatedTickets,
+        TongTien: newTotal
+      });
+      
+      console.log('✅ Booking updated locally');
+    }
+    
+    // Refresh list
+    queryClient.invalidateQueries(['employee-bookings']);
+  },
+  onError: (error) => {
+    console.error('❌ Cancel ticket error:', error);
+    message.error(error?.message || 'Hủy vé thất bại!');
+  }
+});
 
   const bookings = useMemo(() => {
     return bookingsData || [];
   }, [bookingsData]);
 
-  // Format tiền
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('vi-VN', {
       style: 'currency',
@@ -106,28 +185,30 @@ const EmployeeDashboard = () => {
     }).format(value || 0);
   };
 
-  // Render trạng thái thanh toán
   const renderPaymentStatus = (status) => {
-    const statusMap = {
-      0: { text: 'Chưa thanh toán', color: 'default' },
-      1: { text: 'Đã thanh toán', color: 'success' },
-      2: { text: 'Chờ duyệt', color: 'warning' },
-      3: { text: 'Đã hoàn tiền', color: 'error' }
-    };
-    const s = statusMap[status] || statusMap[0];
-    return <Tag color={s.color}>{s.text}</Tag>;
+  const statusMap = {
+    0: { text: 'Chưa thanh toán', color: 'default' },
+    1: { text: 'Đã duyệt', color: 'success' },
+    2: { text: 'Chờ duyệt', color: 'warning' },
+    3: { text: 'Chờ duyệt hủy', color: 'orange' },
+    4: { text: 'Chờ hoàn tiền', color: 'purple' },
+    5: { text: 'Đã hoàn tiền', color: 'error' },
+    6: { text: 'Đã hủy', color: 'default' }
   };
+  const s = statusMap[status] || statusMap[0];
+  return <Tag color={s.color}>{s.text}</Tag>;
+};
 
-  // Render trạng thái vé
   const renderTicketStatus = (status) => {
-    return status === 0 ? (
-      <Tag color="blue">Chưa sử dụng</Tag>
-    ) : (
-      <Tag color="green">Đã sử dụng</Tag>
-    );
+  const statusMap = {
+    0: { text: 'Chưa sử dụng', color: 'default' },
+    1: { text: 'Đã thanh toán', color: 'success' },
+    2: { text: 'Đã hủy', color: 'error' } // ← THÊM TRẠNG THÁI 2
   };
-
-  // Xem chi tiết
+  
+  const s = statusMap[status] || statusMap[0];
+  return <Tag color={s.color}>{s.text}</Tag>;
+};
   const showBookingDetail = (booking) => {
     setSelectedBooking(booking);
     setIsDrawerVisible(true);
@@ -138,7 +219,6 @@ const EmployeeDashboard = () => {
     setSelectedBooking(null);
   };
 
-  // Duyệt thanh toán
   const handleApprovePayment = (bookingId) => {
     setPendingBookingId(bookingId);
     setIsApproveModalVisible(true);
@@ -150,7 +230,6 @@ const EmployeeDashboard = () => {
     setPendingBookingId(null);
   };
 
-  // Hủy đơn hàng
   const handleCancelBooking = (bookingId) => {
     setPendingBookingId(bookingId);
     setIsCancelModalVisible(true);
@@ -162,7 +241,6 @@ const EmployeeDashboard = () => {
     setPendingBookingId(null);
   };
 
-  // Hủy vé đơn lẻ
   const handleCancelTicket = (ticketId) => {
     setPendingTicketId(ticketId);
     setIsCancelTicketModalVisible(true);
@@ -174,7 +252,6 @@ const EmployeeDashboard = () => {
     setPendingTicketId(null);
   };
 
-  // Filter bookings
   const filteredBookings = bookings.filter(booking => {
     if (filters.status !== 'all' && booking.TrangThaiTT !== parseInt(filters.status)) {
       return false;
@@ -191,7 +268,6 @@ const EmployeeDashboard = () => {
     return true;
   });
 
-  // Cột bảng
   const columns = [
     {
       title: 'Mã đơn',
@@ -245,47 +321,62 @@ const EmployeeDashboard = () => {
       render: (date) => dayjs(date).format('DD/MM/YYYY HH:mm')
     },
     {
-      title: 'Hành động',
-      key: 'action',
-      width: 280,
-      render: (_, record) => (
-        <Space>
+  title: 'Hành động',
+  key: 'action',
+  width: 280,
+  render: (_, record) => (
+    <Space>
+      <Button
+        type="primary"
+        icon={<EyeOutlined />}
+        size="small"
+        onClick={() => showBookingDetail(record)}
+      >
+        Xem
+      </Button>
+      
+      {/* ===== CHỈ HIỆN KHI TRẠNG THÁI 2 ===== */}
+      {record.TrangThaiTT === 2 && (
+        <>
           <Button
             type="primary"
-            icon={<EyeOutlined />}
+            icon={<CheckCircleOutlined />}
             size="small"
-            onClick={() => showBookingDetail(record)}
+            style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}
+            onClick={() => handleApprovePayment(record.MaDon)}
+            loading={approvePaymentMutation.isPending}
           >
-            Xem
+            Duyệt
           </Button>
           
-          {record.TrangThaiTT === 2 && (
-            <>
-              <Button
-                type="primary"
-                icon={<CheckCircleOutlined />}
-                size="small"
-                style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}
-                onClick={() => handleApprovePayment(record.MaDon)}
-                loading={approvePaymentMutation.isPending}
-              >
-                Duyệt
-              </Button>
-              
-              <Button
-                danger
-                icon={<CloseCircleOutlined />}
-                size="small"
-                onClick={() => handleCancelBooking(record.MaDon)}
-                loading={cancelBookingMutation.isPending}
-              >
-                Hủy đơn
-              </Button>
-            </>
-          )}
-        </Space>
-      )
-    }
+          <Button
+            danger
+            icon={<CloseCircleOutlined />}
+            size="small"
+            onClick={() => handleCancelBooking(record.MaDon)}
+            loading={cancelBookingMutation.isPending}
+          >
+            Hủy
+          </Button>
+        </>
+      )}
+
+      {/* Duyệt hủy cho trạng thái 3 */}
+      {record.TrangThaiTT === 3 && (
+        <Button
+          type="primary"
+          icon={<CheckCircleOutlined />}
+          size="small"
+          style={{ backgroundColor: '#fa8c16', borderColor: '#fa8c16' }}
+          onClick={() => handleApproveCancellation(record.MaDon)}
+          loading={approveCancellationMutation.isPending}
+        >
+          Duyệt hủy
+        </Button>
+      )}
+    </Space>
+  )
+}
   ];
 
   return (
@@ -307,7 +398,6 @@ const EmployeeDashboard = () => {
             </Button>
           }
         >
-          {/* Filters */}
           <div style={{ marginBottom: '16px', display: 'flex', gap: '12px' }}>
             <Input
               placeholder="Tìm theo mã đơn, tên khách..."
@@ -328,7 +418,10 @@ const EmployeeDashboard = () => {
               <Option value="0">Chưa thanh toán</Option>
               <Option value="1">Đã thanh toán</Option>
               <Option value="2">Chờ duyệt</Option>
-              <Option value="3">Đã hoàn tiền</Option>
+              <Option value="3">Chờ duyệt hủy</Option>
+              <Option value="4">Chờ hoàn tiền</Option>
+              <Option value="5">Đã hoàn tiền</Option>
+              <Option value="6">Đã hủy</Option>
             </Select>
           </div>
 
@@ -420,7 +513,6 @@ const EmployeeDashboard = () => {
               </Descriptions.Item>
             </Descriptions>
 
-            {/* Danh sách vé */}
             <div style={{ marginTop: '24px' }}>
               <h4>🎫 Danh sách vé ({selectedBooking.tickets?.length || 0})</h4>
               <Table
@@ -520,7 +612,6 @@ const EmployeeDashboard = () => {
         )}
       </Drawer>
 
-      {/* Modal xác nhận Duyệt */}
       <Modal
         title="Xác nhận duyệt thanh toán"
         open={isApproveModalVisible}
@@ -538,7 +629,6 @@ const EmployeeDashboard = () => {
         <p>Bạn đã kiểm tra và xác nhận khách hàng đã thanh toán đúng số tiền?</p>
       </Modal>
 
-      {/* Modal xác nhận Hủy đơn */}
       <Modal
         title="Xác nhận hủy đơn hàng"
         open={isCancelModalVisible}
@@ -562,7 +652,6 @@ const EmployeeDashboard = () => {
         </ul>
       </Modal>
 
-      {/* Modal xác nhận Hủy vé đơn lẻ */}
       <Modal
         title="Xác nhận hủy vé"
         open={isCancelTicketModalVisible}
@@ -583,6 +672,31 @@ const EmployeeDashboard = () => {
           <li>Vé sẽ không thể sử dụng</li>
           <li>Ghế sẽ được giải phóng</li>
           <li>Tiền vé sẽ được trừ khỏi tổng đơn hàng</li>
+        </ul>
+      </Modal>
+
+      <Modal
+        title="Xác nhận duyệt hủy vé"
+        open={isApproveCancelModalVisible}
+        onOk={confirmApproveCancellation}
+        onCancel={() => {
+          setIsApproveCancelModalVisible(false);
+          setPendingCancelBookingId(null);
+        }}
+        okText="Duyệt hủy"
+        cancelText="Quay lại"
+        okButtonProps={{ loading: approveCancellationMutation.isPending }}
+        mask={false}
+        maskClosable={false}
+      >
+        <p><strong>Bạn có chắc muốn duyệt yêu cầu hủy vé này?</strong></p>
+        <p>Sau khi duyệt:</p>
+        <ul>
+          <li>✅ Yêu cầu hoàn tiền sẽ được tạo</li>
+          <li>✅ Trạng thái chuyển sang "Chờ hoàn tiền"</li>
+          <li>⏳ Sau 10 giây sẽ tự động hoàn tiền</li>
+          <li>✅ Tất cả vé trong đơn sẽ bị hủy</li>
+          <li>✅ Ghế sẽ được giải phóng</li>
         </ul>
       </Modal>
     </Layout>

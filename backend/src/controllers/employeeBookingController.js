@@ -1,5 +1,6 @@
-const { Booking, Ticket, Trip, Route, Location, PaymentMethod, User } = require('../models');
+const { Booking, Ticket, Trip, Route, Location, PaymentMethod, User, Bus } = require('../models');
 const { sequelize } = require('../config/database');
+const { Op } = require('sequelize');
 
 // @desc    Lấy danh sách đơn vé
 // @route   GET /api/employee/bookings
@@ -22,11 +23,43 @@ const getAllBookings = async (req, res, next) => {
         },
         {
           model: Ticket,
-          as: 'tickets'
+          as: 'tickets',
+          include: [
+            {
+              model: Trip,
+              as: 'trip',
+              attributes: ['MaChuyen', 'ThoiGianKhoiHanh', 'ThoiGianDuKienDen'],
+              include: [
+                {
+                  model: Route,
+                  as: 'route',
+                  include: [
+                    {
+                      model: Location,
+                      as: 'diemDi',
+                      attributes: ['MaDiaDiem', 'TenDiaDiem', 'TenTinh']
+                    },
+                    {
+                      model: Location,
+                      as: 'diemDen',
+                      attributes: ['MaDiaDiem', 'TenDiaDiem', 'TenTinh']
+                    }
+                  ]
+                },
+                {
+                  model: Bus,
+                  as: 'bus',
+                  attributes: ['BienSoXe', 'LoaiXe'] // ← BỎ MaXe
+                }
+              ]
+            }
+          ]
         }
       ],
       order: [['NgayDat', 'DESC']]
     });
+
+    console.log(`✅ Found ${bookings.length} bookings`);
 
     res.json({
       success: true,
@@ -75,14 +108,19 @@ const getBookingDetail = async (req, res, next) => {
                     {
                       model: Location,
                       as: 'diemDi',
-                      attributes: ['MaDiaDiem', 'TenDiaDiem']
+                      attributes: ['MaDiaDiem', 'TenDiaDiem', 'TenTinh']
                     },
                     {
                       model: Location,
                       as: 'diemDen',
-                      attributes: ['MaDiaDiem', 'TenDiaDiem']
+                      attributes: ['MaDiaDiem', 'TenDiaDiem', 'TenTinh']
                     }
                   ]
+                },
+                {
+                  model: Bus,
+                  as: 'bus',
+                  attributes: ['BienSoXe', 'LoaiXe'] // ← BỎ MaXe
                 }
               ]
             }
@@ -109,18 +147,23 @@ const getBookingDetail = async (req, res, next) => {
   }
 };
 
-// @desc    Duyệt thanh toán
-// @route   PUT /api/employee/bookings/:id/approve
-// @access  Private/Employee
+// Các functions còn lại giữ nguyên...
 const approvePayment = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   
   try {
-    const bookingId = req.params.id;
+    const bookingId = parseInt(req.params.id);
     
     console.log('✅ Approving payment:', bookingId);
 
-    const booking = await Booking.findByPk(bookingId, { transaction });
+    const [booking] = await sequelize.query(
+      'SELECT * FROM DonDatVe WHERE MaDon = ?',
+      {
+        replacements: [bookingId],
+        type: sequelize.QueryTypes.SELECT,
+        transaction
+      }
+    );
 
     if (!booking) {
       await transaction.rollback();
@@ -138,13 +181,36 @@ const approvePayment = async (req, res, next) => {
       });
     }
 
-    // Cập nhật trạng thái
-    await booking.update({
-      TrangThaiTT: 1, // Đã thanh toán
-      NgayThanhToan: new Date()
-    }, { transaction });
+    await sequelize.query(
+      'UPDATE DonDatVe SET TrangThaiTT = 1 WHERE MaDon = ?',
+      {
+        replacements: [bookingId],
+        type: sequelize.QueryTypes.UPDATE,
+        transaction
+      }
+    );
+
+    await sequelize.query(
+      'UPDATE ChiTietVe SET TrangThaiVe = 1 WHERE MaDon = ?',
+      {
+        replacements: [bookingId],
+        type: sequelize.QueryTypes.UPDATE,
+        transaction
+      }
+    );
 
     await transaction.commit();
+
+    try {
+      const { default: Notification } = await import('../models/Notification.js');
+      await Notification.create({
+        MaNguoiDung: booking.MaNguoiDung,
+        NoiDung: `Đơn vé ${booking.MaBooking} đã được duyệt. Vé của bạn đã sẵn sàng!`,
+        LoaiThongBao: 'BOOKING_APPROVED'
+      });
+    } catch (notifError) {
+      console.error('❌ Notification error:', notifError);
+    }
 
     res.json({
       success: true,
@@ -152,33 +218,28 @@ const approvePayment = async (req, res, next) => {
     });
 
   } catch (error) {
-    await transaction.rollback();
+    if (!transaction.finished) {
+      await transaction.rollback();
+    }
     console.error('❌ Error approving payment:', error);
     next(error);
   }
 };
 
-// @desc    Hủy đơn hàng
-// @route   PUT /api/employee/bookings/:id/cancel
-// @access  Private/Employee
 const cancelBooking = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   
   try {
-    const bookingId = req.params.id;
-    const { lyDoHuy } = req.body; // Optional: Lý do hủy
+    const bookingId = parseInt(req.params.id);
     
-    console.log('❌ Cancelling booking:', bookingId);
-
-    const booking = await Booking.findByPk(bookingId, {
-      include: [
-        {
-          model: Ticket,
-          as: 'tickets'
-        }
-      ],
-      transaction
-    });
+    const [booking] = await sequelize.query(
+      'SELECT * FROM DonDatVe WHERE MaDon = ?',
+      {
+        replacements: [bookingId],
+        type: sequelize.QueryTypes.SELECT,
+        transaction
+      }
+    );
 
     if (!booking) {
       await transaction.rollback();
@@ -196,24 +257,36 @@ const cancelBooking = async (req, res, next) => {
       });
     }
 
-    // Cập nhật trạng thái đơn hàng
-    await booking.update({
-      TrangThaiTT: 3, // Đã hủy/Hoàn tiền
-      GhiChu: lyDoHuy || 'Đơn hàng bị hủy bởi nhân viên'
-    }, { transaction });
+    await sequelize.query(
+      'UPDATE DonDatVe SET TrangThaiTT = 6 WHERE MaDon = ?',
+      {
+        replacements: [bookingId],
+        type: sequelize.QueryTypes.UPDATE,
+        transaction
+      }
+    );
 
-    // Hủy tất cả vé trong đơn
-    if (booking.tickets && booking.tickets.length > 0) {
-      await Ticket.update(
-        { TrangThaiVe: 2 }, // 2 = Đã hủy
-        {
-          where: { MaDon: bookingId },
-          transaction
-        }
-      );
-    }
+    await sequelize.query(
+      'UPDATE ChiTietVe SET TrangThaiVe = 2 WHERE MaDon = ?',
+      {
+        replacements: [bookingId],
+        type: sequelize.QueryTypes.UPDATE,
+        transaction
+      }
+    );
 
     await transaction.commit();
+
+    try {
+      const { default: Notification } = await import('../models/Notification.js');
+      await Notification.create({
+        MaNguoiDung: booking.MaNguoiDung,
+        NoiDung: `Đơn vé ${booking.MaBooking} đã bị hủy bởi nhân viên.`,
+        LoaiThongBao: 'BOOKING_CANCELLED'
+      });
+    } catch (notifError) {
+      console.error('❌ Notification error:', notifError);
+    }
 
     res.json({
       success: true,
@@ -221,15 +294,14 @@ const cancelBooking = async (req, res, next) => {
     });
 
   } catch (error) {
-    await transaction.rollback();
+    if (!transaction.finished) {
+      await transaction.rollback();
+    }
     console.error('❌ Error cancelling booking:', error);
     next(error);
   }
 };
 
-// @desc    Cập nhật trạng thái vé
-// @route   PUT /api/employee/tickets/:id/status
-// @access  Private/Employee
 const updateTicketStatus = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   
@@ -237,28 +309,22 @@ const updateTicketStatus = async (req, res, next) => {
     const ticketId = req.params.id;
     const { TrangThaiVe } = req.body;
 
-    console.log('🎫 Updating ticket status:', ticketId, 'to', TrangThaiVe);
-
-    // Validate
     if (TrangThaiVe !== 0 && TrangThaiVe !== 1) {
       await transaction.rollback();
       return res.status(400).json({
         success: false,
-        message: 'Trạng thái không hợp lệ (0=Chưa sử dụng, 1=Đã sử dụng)'
+        message: 'Trạng thái không hợp lệ'
       });
     }
 
-    const ticket = await Ticket.findByPk(ticketId, { transaction });
-
-    if (!ticket) {
-      await transaction.rollback();
-      return res.status(404).json({
-        success: false,
-        message: 'Không tìm thấy vé'
-      });
-    }
-
-    await ticket.update({ TrangThaiVe }, { transaction });
+    await sequelize.query(
+      'UPDATE ChiTietVe SET TrangThaiVe = ? WHERE MaVe = ?',
+      {
+        replacements: [TrangThaiVe, ticketId],
+        type: sequelize.QueryTypes.UPDATE,
+        transaction
+      }
+    );
 
     await transaction.commit();
 
@@ -268,12 +334,19 @@ const updateTicketStatus = async (req, res, next) => {
     });
 
   } catch (error) {
-    await transaction.rollback();
-    console.error('❌ Error updating ticket status:', error);
+    if (!transaction.finished) {
+      await transaction.rollback();
+    }
     next(error);
   }
 };
 
+// @desc    Hủy vé đơn lẻ
+// @route   PUT /api/employee/tickets/:id/cancel
+// @access  Private/Employee
+// @desc    Hủy vé đơn lẻ
+// @route   PUT /api/employee/tickets/:id/cancel
+// @access  Private/Employee
 // @desc    Hủy vé đơn lẻ
 // @route   PUT /api/employee/tickets/:id/cancel
 // @access  Private/Employee
@@ -282,18 +355,18 @@ const cancelTicket = async (req, res, next) => {
   
   try {
     const ticketId = req.params.id;
-    
+    const employeeId = req.user?.MaNhanVien || null;
+
     console.log('❌ Cancelling ticket:', ticketId);
 
-    const ticket = await Ticket.findByPk(ticketId, {
-      include: [
-        {
-          model: Booking,
-          as: 'booking'
-        }
-      ],
-      transaction
-    });
+    const [ticket] = await sequelize.query(
+      'SELECT * FROM ChiTietVe WHERE MaVe = ?',
+      {
+        replacements: [ticketId],
+        type: sequelize.QueryTypes.SELECT,
+        transaction
+      }
+    );
 
     if (!ticket) {
       await transaction.rollback();
@@ -303,57 +376,143 @@ const cancelTicket = async (req, res, next) => {
       });
     }
 
-    // Kiểm tra đơn hàng phải đang chờ duyệt
-    if (ticket.booking && ticket.booking.TrangThaiTT !== 2) {
-      await transaction.rollback();
-      return res.status(400).json({
-        success: false,
-        message: 'Chỉ có thể hủy vé của đơn đang chờ duyệt'
-      });
-    }
-
-    // Kiểm tra vé chưa bị hủy
     if (ticket.TrangThaiVe === 2) {
       await transaction.rollback();
       return res.status(400).json({
         success: false,
-        message: 'Vé đã bị hủy trước đó'
+        message: 'Vé đã bị hủy'
       });
     }
 
-    // Hủy vé
-    await ticket.update({
-      TrangThaiVe: 2 // Đã hủy
-    }, { transaction });
-
-    // Cập nhật lại tổng tiền đơn hàng
-    const remainingTickets = await Ticket.findAll({
-      where: {
-        MaDon: ticket.MaDon,
-        TrangThaiVe: { [sequelize.Op.ne]: 2 } // Không bị hủy
-      },
-      transaction
-    });
-
-    const newTotal = remainingTickets.reduce((sum, t) => sum + parseFloat(t.GiaVe || 0), 0);
-
-    await Booking.update(
-      { TongTien: newTotal },
+    const [booking] = await sequelize.query(
+      'SELECT * FROM DonDatVe WHERE MaDon = ?',
       {
-        where: { MaDon: ticket.MaDon },
+        replacements: [ticket.MaDon],
+        type: sequelize.QueryTypes.SELECT,
         transaction
       }
     );
 
+    if (!booking) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy đơn hàng'
+      });
+    }
+
+    // Hủy vé
+    await sequelize.query(
+      'UPDATE ChiTietVe SET TrangThaiVe = 2 WHERE MaVe = ?',
+      {
+        replacements: [ticketId],
+        type: sequelize.QueryTypes.UPDATE,
+        transaction
+      }
+    );
+
+    // Tính lại tổng tiền
+    const [result] = await sequelize.query(
+      'SELECT SUM(GiaVe) as total FROM ChiTietVe WHERE MaDon = ? AND TrangThaiVe != 2',
+      {
+        replacements: [ticket.MaDon],
+        type: sequelize.QueryTypes.SELECT,
+        transaction
+      }
+    );
+
+    const newTotal = result.total || 0;
+    
+    console.log('💰 Old total:', booking.TongTien);
+    console.log('💰 New total:', newTotal);
+
+    // Cập nhật tổng tiền
+    await sequelize.query(
+      'UPDATE DonDatVe SET TongTien = ? WHERE MaDon = ?',
+      {
+        replacements: [newTotal, ticket.MaDon],
+        type: sequelize.QueryTypes.UPDATE,
+        transaction
+      }
+    );
+
+    // ===== TẠO GIAO DỊCH HOÀN TIỀN VÀ GỬI THÔNG BÁO =====
+    let refundCreated = false;
+    if (booking.TrangThaiTT === 1 || booking.TrangThaiTT === 2) {
+      const [existingRefund] = await sequelize.query(
+        'SELECT * FROM GiaoDichHoanTien WHERE MaVe = ?',
+        {
+          replacements: [ticketId],
+          type: sequelize.QueryTypes.SELECT,
+          transaction
+        }
+      );
+
+      if (!existingRefund) {
+        // Tạo giao dịch hoàn tiền
+        await sequelize.query(
+          `INSERT INTO GiaoDichHoanTien 
+           (MaVe, SoTienHoan, TrangThai, GhiChu, NhanVienXuLy_ID) 
+           VALUES (?, ?, ?, ?, ?)`,
+          {
+            replacements: [
+              ticketId,
+              ticket.GiaVe,
+              1, // ← TRẠNG THÁI 1 = ĐÃ HOÀN TIỀN LUÔN
+              `Hoàn tiền vé bị hủy bởi nhân viên - Đơn ${booking.MaBooking}`,
+              employeeId
+            ],
+            type: sequelize.QueryTypes.INSERT,
+            transaction
+          }
+        );
+        
+        refundCreated = true;
+        console.log('✅ Refund transaction created and completed');
+      }
+    }
+
     await transaction.commit();
+
+    // ===== GỬI THÔNG BÁO =====
+    try {
+      const { default: Notification } = await import('../models/Notification.js');
+      
+      if (refundCreated) {
+        // Thông báo đã hoàn tiền
+        await Notification.create({
+          MaNguoiDung: booking.MaNguoiDung,
+          NoiDung: `💰 Vé #${ticketId} trong đơn ${booking.MaBooking} đã bị hủy. Số tiền ${ticket.GiaVe.toLocaleString('vi-VN')}đ đã được hoàn vào tài khoản của bạn.`,
+          LoaiThongBao: 'REFUND_COMPLETED'
+        });
+      } else {
+        // Thông báo hủy vé thường
+        await Notification.create({
+          MaNguoiDung: booking.MaNguoiDung,
+          NoiDung: `Vé #${ticketId} trong đơn ${booking.MaBooking} đã bị hủy bởi nhân viên.`,
+          LoaiThongBao: 'TICKET_CANCELLED'
+        });
+      }
+    } catch (notifError) {
+      console.error('❌ Notification error:', notifError);
+    }
 
     res.json({
       success: true,
-      message: 'Đã hủy vé thành công'
+      message: 'Đã hủy vé thành công',
+      data: {
+        ticketId: ticketId,
+        oldTotal: booking.TongTien,
+        newTotal: newTotal,
+        refundAmount: ticket.GiaVe,
+        refundCreated: refundCreated
+      }
     });
 
   } catch (error) {
-    await transaction.rollback();
+    if (!transaction.finished) {
+      await transaction.rollback();
+    }
     console.error('❌ Error cancelling ticket:', error);
     next(error);
   }
@@ -363,7 +522,7 @@ module.exports = {
   getAllBookings,
   getBookingDetail,
   approvePayment,
-  cancelBooking, // ← ĐỔI TÊN
-  cancelTicket, // ← THÊM MỚI
+  cancelBooking,
+  cancelTicket,
   updateTicketStatus
 };

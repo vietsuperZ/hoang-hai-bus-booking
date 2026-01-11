@@ -4,6 +4,9 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice';
 
+// 1. Import component thông báo
+import NotificationBell from '../NotificationBell';
+
 const { Header: AntHeader } = Layout;
 
 const Header = () => {
@@ -17,7 +20,8 @@ const Header = () => {
     navigate('/login');
   };
 
-  // Menu items cho user dropdown
+
+  
   const userMenuItems = [
     {
       key: 'profile',
@@ -31,7 +35,6 @@ const Header = () => {
       label: 'Vé của tôi',
       onClick: () => navigate('/my-bookings'),
     },
-    // CHỈ HIỆN MENU QUẢN TRỊ CHO ADMIN
     ...(user?.roles?.some(r => r.TenVaiTro === 'Admin')
       ? [{
           key: 'admin',
@@ -41,7 +44,6 @@ const Header = () => {
         }]
       : []
     ),
-    // CHỈ HIỆN MENU NHÂN VIÊN CHO NHÂN VIÊN (KHÔNG PHẢI ADMIN)
     ...(user?.roles?.some(r => r.TenVaiTro === 'Nhân viên') && !user?.roles?.some(r => r.TenVaiTro === 'Admin')
       ? [{
           key: 'employee',
@@ -51,9 +53,7 @@ const Header = () => {
         }]
       : []
     ),
-    {
-      type: 'divider',
-    },
+    { type: 'divider' },
     {
       key: 'logout',
       icon: <LogoutOutlined />,
@@ -63,7 +63,6 @@ const Header = () => {
     },
   ];
 
-  // Xác định menu item nào đang active
   const getSelectedKey = () => {
     if (location.pathname === '/') return 'home';
     if (location.pathname.startsWith('/search')) return 'search';
@@ -83,7 +82,6 @@ const Header = () => {
       background: '#001529',
       boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
     }}>
-      {/* Logo & Menu */}
       <div style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
         <Link 
           to="/" 
@@ -113,19 +111,25 @@ const Header = () => {
         </Menu>
       </div>
 
-      {/* Auth Section */}
       <div>
         {isAuthenticated ? (
-          <Dropdown 
-            menu={{ items: userMenuItems }} 
-            placement="bottomRight"
-            trigger={['click']}
-          >
-            <Space style={{ cursor: 'pointer', color: 'white' }}>
-              <Avatar icon={<UserOutlined />} style={{ background: '#1890ff' }} />
-              <span>{user?.HoTen}</span>
-            </Space>
-          </Dropdown>
+          // 2. Sử dụng Space để đặt Thông báo cạnh Avatar
+          <Space size="large">
+            
+            {/* COMPONENT THÔNG BÁO */}
+            <NotificationBell />
+
+            <Dropdown 
+              menu={{ items: userMenuItems }} 
+              placement="bottomRight"
+              trigger={['click']}
+            >
+              <Space style={{ cursor: 'pointer', color: 'white' }}>
+                <Avatar icon={<UserOutlined />} style={{ background: '#1890ff' }} />
+                <span>{user?.HoTen}</span>
+              </Space>
+            </Dropdown>
+          </Space>
         ) : (
           <Space>
             <Button onClick={() => navigate('/login')}>

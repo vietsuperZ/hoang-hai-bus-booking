@@ -40,15 +40,28 @@ const authService = {
     return response;
   },
 
-  // Lấy user từ localStorage
+  // ===== FIX: LẤY USER AN TOÀN =====
   getCurrentUser: () => {
-    const userStr = localStorage.getItem('user');
-    return userStr ? JSON.parse(userStr) : null;
+    try {
+      const userStr = localStorage.getItem('user');
+      
+      // Kiểm tra kỹ trước khi parse
+      if (!userStr || userStr === 'undefined' || userStr === 'null') {
+        return null;
+      }
+      
+      return JSON.parse(userStr);
+    } catch (error) {
+      console.error('❌ Error parsing user from localStorage:', error);
+      localStorage.removeItem('user'); // Xóa data lỗi
+      return null;
+    }
   },
 
   // Kiểm tra đã đăng nhập chưa
   isAuthenticated: () => {
-    return !!localStorage.getItem('accessToken');
+    const token = localStorage.getItem('accessToken');
+    return !!token && token !== 'undefined' && token !== 'null';
   },
 
   // Kiểm tra role

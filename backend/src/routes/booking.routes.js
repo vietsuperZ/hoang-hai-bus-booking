@@ -9,7 +9,9 @@ const {
   getAllBookings,
   autoApproveBooking,
   cassoWebhook,      // THÊM
-  checkPaymentStatus // THÊM
+  checkPaymentStatus,
+  approveCancellation,
+  completeRefund // THÊM
 } = require('../controllers/bookingController');
 const { authenticate } = require('../middleware/authMiddleware');
 const { authorize } = require('../middleware/roleMiddleware');
@@ -28,5 +30,7 @@ router.delete('/:id', authenticate, cancelBooking);
 router.get('/', authenticate, authorize('Admin', 'Nhân viên'), getAllBookings);
 router.put('/:id/approve', authenticate, authorize('Admin', 'Nhân viên'), approveBooking);
 router.put('/:id/auto-approve', authenticate, autoApproveBooking);
+router.put('/:id/approve-cancel', authenticate, approveCancellation);
+router.put('/:id/complete-refund', authenticate, completeRefund);
 
 module.exports = router;

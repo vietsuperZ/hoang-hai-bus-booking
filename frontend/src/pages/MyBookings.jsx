@@ -40,7 +40,6 @@ const MyBookings = () => {
     queryFn: bookingService.getMyBookings
   });
 
-  // Hiển thị TẤT CẢ đơn (kể cả đã hủy) - Đây là lịch sử
   const bookings = bookingsData?.data || [];
 
   const formatCurrency = (amount) => {
@@ -52,18 +51,15 @@ const MyBookings = () => {
     return dateTime ? dayjs(dateTime).format('DD/MM/YYYY HH:mm') : defaultText;
   };
 
-  const getPaymentStatusTag = (status, booking) => {
+  const getPaymentStatusTag = (status) => {
     const statusMap = {
       0: { text: 'Chưa thanh toán', icon: <ClockCircleOutlined />, color: 'default' },
       1: { text: 'Đã thanh toán', icon: <CheckCircleOutlined />, color: 'success' },
       2: { text: 'Chờ duyệt', icon: <ClockCircleOutlined />, color: 'warning' },
-      3: { 
-        // Nếu có NgayThanhToan → Đã TT rồi mới hủy → Đã hoàn tiền
-        // Nếu không có → Chưa TT rồi hủy → Đã hủy
-        text: booking?.NgayThanhToan ? 'Đã hoàn tiền' : 'Đã hủy', 
-        icon: <CloseCircleOutlined />, 
-        color: booking?.NgayThanhToan ? 'error' : 'default'
-      }
+      3: { text: 'Chờ duyệt hủy', icon: <ClockCircleOutlined />, color: 'orange' },
+      4: { text: 'Chờ hoàn tiền', icon: <ClockCircleOutlined />, color: 'purple' },
+      5: { text: 'Đã hoàn tiền', icon: <CheckCircleOutlined />, color: 'error' },
+      6: { text: 'Đã hủy', icon: <CloseCircleOutlined />, color: 'default' }
     };
     const s = statusMap[status] || statusMap[0];
     return <Tag icon={s.icon} color={s.color}>{s.text}</Tag>;
@@ -122,7 +118,7 @@ const MyBookings = () => {
             {paymentMethod.TenPTTT || defaultText}
           </Descriptions.Item>
           <Descriptions.Item label="Trạng thái thanh toán">
-            {getPaymentStatusTag(booking.TrangThaiTT, booking)}
+            {getPaymentStatusTag(booking.TrangThaiTT)}
           </Descriptions.Item>
           <Descriptions.Item label="Tổng tiền">
             <strong style={{ fontSize: '18px', color: '#ff4d4f' }}>
@@ -140,7 +136,6 @@ const MyBookings = () => {
   };
 
   const handleCancelBooking = (bookingId, bookingCode, booking) => {
-    // Kiểm tra đã thanh toán chưa
     const isPaid = booking?.TrangThaiTT === 1 || booking?.NgayThanhToan;
     
     setCancelBookingInfo({ 
@@ -215,36 +210,56 @@ const MyBookings = () => {
       title: 'Trạng thái',
       dataIndex: 'TrangThaiTT',
       key: 'TrangThaiTT',
-      render: (status, record) => getPaymentStatusTag(status, record)
+      render: (status) => getPaymentStatusTag(status)
     },
     {
       title: 'Hành động',
       key: 'action',
-      render: (_, record) => (
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <Button
-            type="primary"
-            icon={<EyeOutlined />}
-            onClick={() => showBookingDetail(record)} 
-            size="small"
-          >
-            Xem
-          </Button>
-          
-          {/* Chỉ ẨN nút Hủy khi: Đã hủy/hoàn tiền (3) */}
-          {record.TrangThaiTT !== 3 && (
+      render: (_, record) => {
+        // Kiểm tra thời gian xe chạy
+        const departureTime = record.tickets?.[0]?.trip?.ThoiGianKhoiHanh;
+        const now = new Date();
+        const departure = new Date(departureTime);
+        const hoursDiff = (departure - now) / (1000 * 60 * 60);
+        
+        // CHỈ CHO HỦY KHI:
+        // 1. Chưa hủy/hoàn tiền (NOT IN [3,4,5,6])
+        // 2. Còn >= 24h
+        // 3. Xe chưa chạy (hoursDiff > 0)
+        const canCancel = ![3,4,5,6].includes(record.TrangThaiTT) && hoursDiff >= 24 && hoursDiff > 0;
+        
+        return (
+          <div style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>
             <Button
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => handleCancelBooking(record.MaDon, record.MaBooking, record)}
-              loading={cancelMutation.isPending}
+              type="primary"
+              icon={<EyeOutlined />}
+              onClick={() => showBookingDetail(record)} 
               size="small"
             >
-              Hủy
+              Xem
             </Button>
-          )}
-        </div>
-      )
+            
+            {canCancel && (
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => handleCancelBooking(record.MaDon, record.MaBooking, record)}
+                loading={cancelMutation.isPending}
+                size="small"
+              >
+                Hủy
+              </Button>
+            )}
+            
+            {/* Hiển thị lý do không thể hủy */}
+            {!canCancel && ![3,4,5,6].includes(record.TrangThaiTT) && (
+              <Text type="secondary" style={{ fontSize: '12px', textAlign: 'center' }}>
+                {hoursDiff <= 0 ? 'Xe đã chạy' : 'Không thể hủy (dưới 24h)'}
+              </Text>
+            )}
+          </div>
+        );
+      }
     }
   ];
 
@@ -309,7 +324,6 @@ const MyBookings = () => {
         {renderBookingDetailContent()}
       </Modal>
 
-      {/* MODAL HỦY VÉ / YÊU CẦU HOÀN TIỀN */}
       <Modal
         title={
           cancelBookingInfo?.isPaid 
@@ -346,7 +360,6 @@ const MyBookings = () => {
               Bạn có chắc muốn hủy đơn đặt vé <strong style={{ color: '#1890ff' }}>{cancelBookingInfo.MaBooking}</strong>?
             </p>
             
-            {/* Nếu ĐÃ THANH TOÁN → Hiện thông tin hoàn tiền */}
             {cancelBookingInfo.isPaid ? (
               <div style={{
                 background: '#fff7e6',
@@ -382,7 +395,6 @@ const MyBookings = () => {
                 </ul>
               </div>
             ) : (
-              // Nếu CHƯA THANH TOÁN → Chỉ xác nhận hủy
               <div style={{
                 background: '#f6f6f6',
                 border: '1px solid #d9d9d9',
