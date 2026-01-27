@@ -351,11 +351,14 @@ const TripManagement = () => {
             rules={[{ required: true, message: 'Vui lòng chọn thời gian khởi hành!' }]}
           >
             <DatePicker
-              showTime
-              format="DD/MM/YYYY HH:mm"
-              style={{ width: '100%' }}
-              placeholder="Chọn thời gian khởi hành"
-            />
+            showTime
+            format="DD/MM/YYYY HH:mm"
+            style={{ width: '100%' }}
+            placeholder="Chọn thời gian khởi hành"
+  // Không cho phép chọn ngày trước ngày hôm nay
+            disabledDate={(current) => current && current < dayjs().startOf('day')}
+  // Bạn cũng có thể thêm logic để chặn giờ trong quá khứ nếu chọn ngày hôm nay
+/>
           </Form.Item>
 
           <Form.Item

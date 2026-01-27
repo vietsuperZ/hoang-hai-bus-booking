@@ -17,7 +17,8 @@ import MyBookings from './pages/MyBookings';
 import AdminDashboard from './pages/AdminDashboard';
 import EmployeeDashboard from './pages/EmployeeDashboard';
 import TicketDetail from './pages/TicketDetail';
-
+import TripManagement from './pages/TripManagement';
+import TripDetail from './pages/TripDetail';
 // Components
 import PrivateRoute from './components/common/PrivateRoute';
 import AdminRoute from './components/common/AdminRoute';
@@ -95,7 +96,23 @@ function App() {
                   </PrivateRoute>
                 }
               />
+              <Route 
+  path="/employee/trips" 
+  element={
+    <ProtectedRoute requiredRole="Nhân viên">
+      <TripManagement />
+    </ProtectedRoute>
+  } 
+/>
 
+<Route 
+  path="/employee/trips/:id" 
+  element={
+    <ProtectedRoute requiredRole="Nhân viên">
+      <TripDetail />
+    </ProtectedRoute>
+  } 
+/>
               {/* Admin routes */}
               <Route
                 path="/admin/*"

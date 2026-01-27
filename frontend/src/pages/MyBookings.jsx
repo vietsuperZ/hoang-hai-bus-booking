@@ -1,416 +1,567 @@
-import { useState } from 'react'; 
-import { Layout, Card, Table, Tag, Button, message, Modal, Descriptions, Empty, Spin, Typography } from 'antd';
-import { EyeOutlined, DeleteOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { useState } from 'react';
+import { 
+  Layout, Card, Table, Button, Tag, Space, Drawer, Descriptions, 
+  message, Modal, Form, Input 
+} from 'antd';
+import { 
+  EyeOutlined, StarOutlined, EditOutlined 
+} from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import Header from '../components/common/Header';
 import Footer from '../components/common/Footer';
-import bookingService from '../services/bookingService';
+import ReviewModal from '../components/ReviewModal';
+import api from '../services/api';
 
 const { Content } = Layout;
-const { Text } = Typography;
 
 const MyBookings = () => {
   const queryClient = useQueryClient();
+  const [form] = Form.useForm();
+  const [isDrawerVisible, setIsDrawerVisible] = useState(false);
+  const [selectedTicket, setSelectedTicket] = useState(null);
+  const [isReviewModalVisible, setIsReviewModalVisible] = useState(false);
+  const [selectedTripForReview, setSelectedTripForReview] = useState(null);
+  const [isUpdateModalVisible, setIsUpdateModalVisible] = useState(false);
+  const [ticketToUpdate, setTicketToUpdate] = useState(null);
+const [isCancelModalVisible, setIsCancelModalVisible] = useState(false);
+const [bookingToCancel, setBookingToCancel] = useState(null);
+  // Fetch user's bookings
+  // Fetch user's bookings
+const { data: bookingsData, isLoading } = useQuery({
+  queryKey: ['my-bookings'],
+  queryFn: async () => {
+    const response = await api.get('/bookings/my-bookings');
+    return response.data;
+  },
+  refetchInterval: 3000, // ← THÊM DÒNG NÀY
+  refetchOnWindowFocus: true, // ← THÊM DÒNG NÀY
+  refetchOnMount: true, // ← THÊM DÒNG NÀY
+  staleTime: 0 // ← THÊM DÒNG NÀY
+});
 
-  const [isModalVisible, setIsModalVisible] = useState(false);
-  const [selectedBooking, setSelectedBooking] = useState(null);
-  const [isCancelModalVisible, setIsCancelModalVisible] = useState(false);
-  const [cancelBookingInfo, setCancelBookingInfo] = useState(null);
+  const bookings = bookingsData || [];
 
-  const defaultText = '---'; 
+  // Flatten tickets from all bookings
+  const allTickets = bookings.flatMap(booking =>
+    (booking.tickets || []).map(ticket => ({
+      ...ticket,
+      booking: {
+        MaDon: booking.MaDon,
+        MaBooking: booking.MaBooking,
+        NgayDat: booking.NgayDat,
+        TongTien: booking.TongTien,
+        TrangThaiTT: booking.TrangThaiTT,
+        paymentMethod: booking.paymentMethod
+      }
+    }))
+  );
 
-  const cancelMutation = useMutation({
-    mutationFn: bookingService.cancelBooking,
+  // Mutation cập nhật vé
+  const updateTicketMutation = useMutation({
+    mutationFn: async ({ ticketId, data }) => {
+      return await api.put(`/bookings/ticket/${ticketId}`, data);
+    },
     onSuccess: () => {
-      message.success('Hủy vé thành công!');
+      message.success('Cập nhật thông tin vé thành công!');
       queryClient.invalidateQueries(['my-bookings']);
-      setIsCancelModalVisible(false);
-      setCancelBookingInfo(null);
+      setIsUpdateModalVisible(false);
+      setTicketToUpdate(null);
+      form.resetFields();
+      if (selectedTicket && ticketToUpdate && selectedTicket.MaVe === ticketToUpdate.MaVe) {
+        setIsDrawerVisible(false);
+      }
     },
     onError: (error) => {
-      message.error(error.message || 'Hủy vé thất bại');
-      setIsCancelModalVisible(false);
-      setCancelBookingInfo(null);
+      message.error(error?.response?.data?.message || 'Cập nhật thất bại!');
     }
   });
 
-  const { data: bookingsData, isLoading } = useQuery({
-    queryKey: ['my-bookings'],
-    queryFn: bookingService.getMyBookings
+  // Mutation hủy đơn
+  const cancelBookingMutation = useMutation({
+    mutationFn: async (bookingId) => {
+      return await api.delete(`/bookings/${bookingId}`);
+    },
+    onSuccess: (response) => {
+      message.success(response?.data?.message || 'Yêu cầu hủy vé đã được gửi!');
+      queryClient.invalidateQueries(['my-bookings']);
+    },
+    onError: (error) => {
+      message.error(error?.response?.data?.message || 'Hủy vé thất bại!');
+    }
   });
 
-  const bookings = bookingsData?.data || [];
-
-  const formatCurrency = (amount) => {
-    const numericAmount = Number(amount) || 0; 
-    return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(numericAmount);
+  const handleViewDetail = (ticket) => {
+    setSelectedTicket(ticket);
+    setIsDrawerVisible(true);
   };
 
-  const formatDateTime = (dateTime) => {
-    return dateTime ? dayjs(dateTime).format('DD/MM/YYYY HH:mm') : defaultText;
+  const handleReview = (ticket) => {
+    setSelectedTripForReview({
+      tripId: ticket.MaChuyen,
+      DiemDi: ticket.trip?.route?.diemDi?.TenDiaDiem,
+      DiemDen: ticket.trip?.route?.diemDen?.TenDiaDiem,
+      ThoiGianKhoiHanh: dayjs(ticket.trip?.ThoiGianKhoiHanh).format('DD/MM/YYYY HH:mm')
+    });
+    setIsReviewModalVisible(true);
   };
 
-  const getPaymentStatusTag = (status) => {
+  const handleUpdateTicket = (ticket) => {
+    const departureTime = dayjs(ticket.trip?.ThoiGianKhoiHanh);
+    const now = dayjs();
+    const hoursUntilDeparture = departureTime.diff(now, 'hour');
+
+    if (hoursUntilDeparture < 24) {
+      message.warning('Chỉ có thể cập nhật thông tin trước 24 giờ khởi hành!');
+      return;
+    }
+
+    if (ticket.TrangThaiVe !== 1) {
+      message.warning('Chỉ có thể cập nhật vé đã được duyệt!');
+      return;
+    }
+
+    if (ticket.booking?.TrangThaiTT !== 1) {
+      message.warning('Chỉ có thể cập nhật vé đã thanh toán!');
+      return;
+    }
+
+    setTicketToUpdate(ticket);
+    form.setFieldsValue({
+      TenHanhKhach: ticket.TenHanhKhach,
+      SDT: ticket.SDT,
+      DiemDonChiTiet: ticket.DiemDonChiTiet,
+      DiemTraChiTiet: ticket.DiemTraChiTiet
+    });
+    setIsUpdateModalVisible(true);
+  };
+
+  const handleSubmitUpdate = () => {
+    form.validateFields().then(values => {
+      updateTicketMutation.mutate({
+        ticketId: ticketToUpdate.MaVe,
+        data: values
+      });
+    });
+  };
+
+const handleCancelBooking = (booking, hoursUntilDeparture) => {
+  // Kiểm tra thời gian
+  if (hoursUntilDeparture < 24) {
+    message.warning('Không thể hủy vé trong vòng 24 giờ trước giờ khởi hành!');
+    return;
+  }
+
+  setBookingToCancel(booking);
+  setIsCancelModalVisible(true);
+};
+
+const handleConfirmCancel = () => {
+  if (bookingToCancel) {
+    cancelBookingMutation.mutate(bookingToCancel.MaDon);
+    setIsCancelModalVisible(false);
+    setBookingToCancel(null);
+  }
+};
+
+  const renderTicketStatus = (status) => {
     const statusMap = {
-      0: { text: 'Chưa thanh toán', icon: <ClockCircleOutlined />, color: 'default' },
-      1: { text: 'Đã thanh toán', icon: <CheckCircleOutlined />, color: 'success' },
-      2: { text: 'Chờ duyệt', icon: <ClockCircleOutlined />, color: 'warning' },
-      3: { text: 'Chờ duyệt hủy', icon: <ClockCircleOutlined />, color: 'orange' },
-      4: { text: 'Chờ hoàn tiền', icon: <ClockCircleOutlined />, color: 'purple' },
-      5: { text: 'Đã hoàn tiền', icon: <CheckCircleOutlined />, color: 'error' },
-      6: { text: 'Đã hủy', icon: <CloseCircleOutlined />, color: 'default' }
+      0: { text: 'Chờ duyệt', color: 'warning' },
+      1: { text: 'Đã duyệt', color: 'success' },
+      2: { text: 'Đã hủy', color: 'error' }
     };
     const s = statusMap[status] || statusMap[0];
-    return <Tag icon={s.icon} color={s.color}>{s.text}</Tag>;
+    return <Tag color={s.color}>{s.text}</Tag>;
   };
 
-  const showBookingDetail = (booking) => {
-    setSelectedBooking(booking);
-    setIsModalVisible(true);
-  };
-
-  const handleModalClose = () => {
-    setIsModalVisible(false);
-    setSelectedBooking(null);
-  };
-
-  const renderBookingDetailContent = () => {
-    if (!selectedBooking) return <Spin size="large" />;
-
-    const booking = selectedBooking;
-    const firstTicket = booking.tickets?.[0] || {};
-    const trip = firstTicket.trip || {};
-    const route = trip.route || {};
-    const diemDi = route.diemDi || {};
-    const diemDen = route.diemDen || {};
-    const bus = trip.bus || {};
-    const paymentMethod = booking.paymentMethod || {};
-
-    return (
-      <div style={{ marginTop: '20px' }}>
-        <Descriptions bordered column={1} size="small">
-          <Descriptions.Item label="Mã đặt vé">
-            <strong style={{ color: '#1890ff' }}>{booking.MaBooking || defaultText}</strong>
-          </Descriptions.Item>
-          <Descriptions.Item label="Ngày đặt">
-            {formatDateTime(booking.NgayDat)}
-          </Descriptions.Item>
-          <Descriptions.Item label="Tuyến đường">
-            {`${diemDi.TenDiaDiem || defaultText} → ${diemDen.TenDiaDiem || defaultText}`}
-          </Descriptions.Item>
-          <Descriptions.Item label="Thời gian khởi hành">
-            {formatDateTime(trip.ThoiGianKhoiHanh)}
-          </Descriptions.Item>
-          <Descriptions.Item label="Loại xe">
-            {bus.LoaiXe ? `${bus.LoaiXe} - ${bus.BienSoXe || defaultText}` : defaultText}
-          </Descriptions.Item>
-          <Descriptions.Item label="Số ghế đã đặt">
-            {booking.tickets?.map(t => t.MaGhe).join(', ') || defaultText}
-          </Descriptions.Item>
-          <Descriptions.Item label="Tên hành khách">
-            {firstTicket.TenHanhKhach || defaultText}
-          </Descriptions.Item>
-          <Descriptions.Item label="Số điện thoại">
-            {firstTicket.SDT || defaultText}
-          </Descriptions.Item>
-          <Descriptions.Item label="Phương thức thanh toán">
-            {paymentMethod.TenPTTT || defaultText}
-          </Descriptions.Item>
-          <Descriptions.Item label="Trạng thái thanh toán">
-            {getPaymentStatusTag(booking.TrangThaiTT)}
-          </Descriptions.Item>
-          <Descriptions.Item label="Tổng tiền">
-            <strong style={{ fontSize: '18px', color: '#ff4d4f' }}>
-              {formatCurrency(booking.TongTien)}
-            </strong>
-          </Descriptions.Item>
-          {booking.GhiChuKhachHang && (
-            <Descriptions.Item label="Ghi chú">
-              {booking.GhiChuKhachHang}
-            </Descriptions.Item>
-          )}
-        </Descriptions>
-      </div>
-    );
-  };
-
-  const handleCancelBooking = (bookingId, bookingCode, booking) => {
-    const isPaid = booking?.TrangThaiTT === 1 || booking?.NgayThanhToan;
-    
-    setCancelBookingInfo({ 
-      MaDon: bookingId, 
-      MaBooking: bookingCode,
-      isPaid: isPaid,
-      TongTien: booking?.TongTien || 0
-    });
-    setIsCancelModalVisible(true);
-  };
-
-  const handleConfirmCancel = () => {
-    if (cancelBookingInfo) {
-      cancelMutation.mutate(cancelBookingInfo.MaDon); 
-    }
-  };
-
-  const handleCancelModalClose = () => {
-    setIsCancelModalVisible(false);
-    setCancelBookingInfo(null);
+  const renderPaymentStatus = (status) => {
+    const statusMap = {
+      0: { text: 'Chưa thanh toán', color: 'default' },
+      1: { text: 'Đã thanh toán', color: 'success' },
+      2: { text: 'Chờ duyệt', color: 'warning' },
+      3: { text: 'Chờ duyệt hủy', color: 'orange' },
+      6: { text: 'Đã hủy', color: 'error' }
+    };
+    const s = statusMap[status] || statusMap[0];
+    return <Tag color={s.color}>{s.text}</Tag>;
   };
 
   const columns = [
     {
-      title: 'Mã đặt vé',
-      dataIndex: 'MaBooking',
-      key: 'MaBooking',
-      render: (text) => <strong style={{ color: '#1890ff' }}>{text}</strong>
+      title: 'Mã vé',
+      dataIndex: 'MaVe',
+      key: 'MaVe',
+      render: (text) => <Tag color="blue">#{text}</Tag>
     },
     {
-      title: 'Tuyến đường',
-      key: 'route',
-      render: (_, record) => {
-        const firstTicket = record.tickets?.[0] || {};
-        const route = firstTicket.trip?.route || {};
-        const diemDi = route.diemDi || {};
-        const diemDen = route.diemDen || {};
-        return (
-          <div>
-            <div>{diemDi.TenDiaDiem || defaultText}</div>
-            <div>↓</div>
-            <div>{diemDen.TenDiaDiem || defaultText}</div>
-          </div>
-        );
-      }
-    },
-    {
-      title: 'Ngày đi',
-      key: 'departureTime',
-      render: (_, record) => formatDateTime(record.tickets?.[0]?.trip?.ThoiGianKhoiHanh)
-    },
-    {
-      title: 'Số ghế',
-      key: 'seats',
+      title: 'Chuyến xe',
+      key: 'trip',
       render: (_, record) => (
         <div>
-          {record.tickets?.map(t => (
-            <Tag key={t.MaVe} color="blue">{t.MaGhe}</Tag>
-          )) || defaultText}
+          <div style={{ fontWeight: 'bold' }}>
+            {record.trip?.route?.diemDi?.TenDiaDiem} → {record.trip?.route?.diemDen?.TenDiaDiem}
+          </div>
+          <div style={{ fontSize: 12, color: '#666' }}>
+            {dayjs(record.trip?.ThoiGianKhoiHanh).format('DD/MM/YYYY HH:mm')}
+          </div>
         </div>
       )
     },
     {
-      title: 'Tổng tiền',
-      dataIndex: 'TongTien',
-      key: 'TongTien',
-      render: (amount) => (
-        <strong style={{ color: '#ff4d4f' }}>{formatCurrency(amount)}</strong>
+      title: 'Ghế',
+      dataIndex: 'MaGhe',
+      key: 'MaGhe',
+      align: 'center',
+      render: (text) => <Tag color="purple">{text}</Tag>
+    },
+    {
+      title: 'Hành khách',
+      key: 'passenger',
+      render: (_, record) => (
+        <div>
+          <div>{record.TenHanhKhach}</div>
+          <div style={{ fontSize: 12, color: '#666' }}>{record.SDT}</div>
+        </div>
       )
     },
     {
-      title: 'Trạng thái',
-      dataIndex: 'TrangThaiTT',
-      key: 'TrangThaiTT',
-      render: (status) => getPaymentStatusTag(status)
+      title: 'Giá vé',
+      dataIndex: 'GiaVe',
+      key: 'GiaVe',
+      render: (value) => `${value?.toLocaleString('vi-VN')} đ`
     },
     {
-      title: 'Hành động',
+      title: 'Trạng thái vé',
+      dataIndex: 'TrangThaiVe',
+      key: 'TrangThaiVe',
+      render: renderTicketStatus
+    },
+    {
+      title: 'Thanh toán',
+      key: 'payment',
+      render: (_, record) => renderPaymentStatus(record.booking?.TrangThaiTT)
+    },
+    {
+      title: 'Thao tác',
       key: 'action',
+      width: 220,
       render: (_, record) => {
-        // Kiểm tra thời gian xe chạy
-        const departureTime = record.tickets?.[0]?.trip?.ThoiGianKhoiHanh;
-        const now = new Date();
-        const departure = new Date(departureTime);
-        const hoursDiff = (departure - now) / (1000 * 60 * 60);
+        const isPastTrip = dayjs(record.trip?.ThoiGianKhoiHanh).isBefore(dayjs());
+        const isApproved = record.TrangThaiVe === 1;
+        const isPaid = record.booking?.TrangThaiTT === 1;
+        const isPending = record.booking?.TrangThaiTT === 2;
+        const hoursUntilDeparture = dayjs(record.trip?.ThoiGianKhoiHanh).diff(dayjs(), 'hour');
         
-        // CHỈ CHO HỦY KHI:
-        // 1. Chưa hủy/hoàn tiền (NOT IN [3,4,5,6])
-        // 2. Còn >= 24h
-        // 3. Xe chưa chạy (hoursDiff > 0)
-        const canCancel = ![3,4,5,6].includes(record.TrangThaiTT) && hoursDiff >= 24 && hoursDiff > 0;
+        // Check điều kiện
+        const canCancel = (isPaid || isPending) && !isPastTrip && hoursUntilDeparture >= 24;
+        const canUpdate = !isPastTrip && isApproved && isPaid && hoursUntilDeparture >= 24;
         
         return (
-          <div style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>
-            <Button
-              type="primary"
-              icon={<EyeOutlined />}
-              onClick={() => showBookingDetail(record)} 
-              size="small"
-            >
-              Xem
-            </Button>
-            
-            {canCancel && (
+          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+            <Space size="small">
               <Button
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => handleCancelBooking(record.MaDon, record.MaBooking, record)}
-                loading={cancelMutation.isPending}
+                type="primary"
+                icon={<EyeOutlined />}
                 size="small"
+                onClick={() => handleViewDetail(record)}
               >
-                Hủy
+                Chi tiết
               </Button>
-            )}
-            
-            {/* Hiển thị lý do không thể hủy */}
-            {!canCancel && ![3,4,5,6].includes(record.TrangThaiTT) && (
-              <Text type="secondary" style={{ fontSize: '12px', textAlign: 'center' }}>
-                {hoursDiff <= 0 ? 'Xe đã chạy' : 'Không thể hủy (dưới 24h)'}
-              </Text>
-            )}
-          </div>
+              
+              {canUpdate && (
+                <Button
+                  icon={<EditOutlined />}
+                  size="small"
+                  onClick={() => handleUpdateTicket(record)}
+                >
+                  Cập nhật
+                </Button>
+              )}
+            </Space>
+
+            <Space size="small" style={{ width: '100%' }}>
+              {canCancel && (
+                <Button
+                  danger
+                  size="small"
+                  onClick={() => handleCancelBooking(record.booking, hoursUntilDeparture)}
+                  loading={cancelBookingMutation.isPending}
+                  block
+                >
+                  Hủy vé
+                </Button>
+              )}
+              
+              {isPastTrip && isApproved && (
+                <Button
+                  icon={<StarOutlined />}
+                  size="small"
+                  onClick={() => handleReview(record)}
+                  style={{ color: '#faad14', borderColor: '#faad14' }}
+                  block
+                >
+                  Đánh giá
+                </Button>
+              )}
+            </Space>
+          </Space>
         );
       }
     }
   ];
 
-  if (isLoading) {
-    return (
-      <Layout style={{ minHeight: '100vh' }}>
-        <Header />
-        <Content style={{ padding: '50px', textAlign: 'center' }}>
-          <Spin size="large" />
-        </Content>
-        <Footer />
-      </Layout>
-    );
-  }
-
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Header />
       <Content style={{ padding: '50px', background: '#f0f2f5' }}>
-        <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-          <Card 
-            title={
-              <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
-                📋 Lịch sử đặt vé
-              </div>
-            }
-          >
-            {bookings.length > 0 ? (
-              <Table
-                columns={columns}
-                dataSource={bookings}
-                rowKey="MaDon"
-                pagination={{
-                  pageSize: 10,
-                  showTotal: (total) => `Tổng ${total} đơn đặt vé`
-                }}
-              />
-            ) : (
-              <Empty 
-                description="Bạn chưa có đơn đặt vé nào"
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-              >
-                <Button type="primary" href="/search">
-                  Tìm chuyến xe ngay
-                </Button>
-              </Empty>
-            )}
-          </Card>
-        </div>
+        <Card title="🎫 Vé của tôi">
+          <Table
+            columns={columns}
+            dataSource={allTickets}
+            rowKey="MaVe"
+            loading={isLoading}
+            pagination={{
+              pageSize: 10,
+              showTotal: (total) => `Tổng ${total} vé`
+            }}
+            scroll={{ x: 1200 }}
+          />
+        </Card>
       </Content>
       <Footer />
-      
-      <Modal
-        title="Chi tiết đơn đặt vé"
-        open={isModalVisible} 
-        onCancel={handleModalClose}
-        footer={null} 
-        width={700}
-        mask={false}
-        maskClosable={false}
-      >
-        {renderBookingDetailContent()}
-      </Modal>
 
+      {/* Drawer Chi tiết */}
+      <Drawer
+        title="Chi tiết vé"
+        open={isDrawerVisible}
+        onClose={() => setIsDrawerVisible(false)}
+        width={600}
+      >
+        {selectedTicket && (
+          <div>
+            <Descriptions bordered column={1} size="small">
+              <Descriptions.Item label="Mã vé">
+                <Tag color="blue">#{selectedTicket.MaVe}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Mã đơn">
+                <Tag color="green">{selectedTicket.booking?.MaBooking}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Tuyến đường">
+                <strong>
+                  {selectedTicket.trip?.route?.diemDi?.TenDiaDiem} → {selectedTicket.trip?.route?.diemDen?.TenDiaDiem}
+                </strong>
+              </Descriptions.Item>
+              <Descriptions.Item label="Thời gian khởi hành">
+                {dayjs(selectedTicket.trip?.ThoiGianKhoiHanh).format('DD/MM/YYYY HH:mm')}
+              </Descriptions.Item>
+              <Descriptions.Item label="Dự kiến đến">
+                {dayjs(selectedTicket.trip?.ThoiGianDuKienDen).format('DD/MM/YYYY HH:mm')}
+              </Descriptions.Item>
+              <Descriptions.Item label="Biển số xe">
+                {selectedTicket.trip?.bus?.BienSoXe}
+              </Descriptions.Item>
+              <Descriptions.Item label="Loại xe">
+                {selectedTicket.trip?.bus?.LoaiXe}
+              </Descriptions.Item>
+              <Descriptions.Item label="Số ghế">
+                <Tag color="purple">{selectedTicket.MaGhe}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Hành khách">
+                {selectedTicket.TenHanhKhach}
+              </Descriptions.Item>
+              <Descriptions.Item label="Số điện thoại">
+                {selectedTicket.SDT}
+              </Descriptions.Item>
+              <Descriptions.Item label="Điểm đón">
+                {selectedTicket.DiemDonChiTiet || '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Điểm trả">
+                {selectedTicket.DiemTraChiTiet || '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Giá vé">
+                <strong style={{ color: '#52c41a', fontSize: 16 }}>
+                  {selectedTicket.GiaVe?.toLocaleString('vi-VN')} đ
+                </strong>
+              </Descriptions.Item>
+              <Descriptions.Item label="Trạng thái vé">
+                {renderTicketStatus(selectedTicket.TrangThaiVe)}
+              </Descriptions.Item>
+              <Descriptions.Item label="Trạng thái thanh toán">
+                {renderPaymentStatus(selectedTicket.booking?.TrangThaiTT)}
+              </Descriptions.Item>
+              <Descriptions.Item label="Phương thức thanh toán">
+                {selectedTicket.booking?.paymentMethod?.TenPTTT}
+              </Descriptions.Item>
+              <Descriptions.Item label="Ngày đặt">
+                {dayjs(selectedTicket.booking?.NgayDat).format('DD/MM/YYYY HH:mm')}
+              </Descriptions.Item>
+            </Descriptions>
+          </div>
+        )}
+      </Drawer>
+
+      {/* Modal cập nhật thông tin */}
       <Modal
-        title={
-          cancelBookingInfo?.isPaid 
-            ? "⚠️ Xác nhận yêu cầu hoàn tiền" 
-            : "Xác nhận hủy vé"
-        }
-        open={isCancelModalVisible}
-        onCancel={handleCancelModalClose}
-        footer={[
-          <Button 
-            key="back" 
-            onClick={handleCancelModalClose} 
-            disabled={cancelMutation.isPending}
-          >
-            Quay lại
-          </Button>,
-          <Button 
-            key="submit" 
-            type="primary" 
-            danger 
-            loading={cancelMutation.isPending} 
-            onClick={handleConfirmCancel}
-          >
-            {cancelBookingInfo?.isPaid ? '✅ Gửi yêu cầu hoàn tiền' : 'Hủy vé'}
-          </Button>,
-        ]}
-        width={500}
+        title={<><EditOutlined /> Cập nhật thông tin vé</>}
+        open={isUpdateModalVisible}
+        onCancel={() => {
+          setIsUpdateModalVisible(false);
+          setTicketToUpdate(null);
+          form.resetFields();
+        }}
+        onOk={handleSubmitUpdate}
+        okText="Cập nhật"
+        cancelText="Hủy"
+        confirmLoading={updateTicketMutation.isPending}
+        width={600}
         mask={false}
         maskClosable={false}
       >
-        {cancelBookingInfo ? (
+        {ticketToUpdate && (
           <div>
-            <p style={{ fontSize: '15px', marginBottom: '16px' }}>
-              Bạn có chắc muốn hủy đơn đặt vé <strong style={{ color: '#1890ff' }}>{cancelBookingInfo.MaBooking}</strong>?
-            </p>
-            
-            {cancelBookingInfo.isPaid ? (
-              <div style={{
-                background: '#fff7e6',
-                border: '1px solid #ffd591',
-                borderRadius: '8px',
-                padding: '16px',
-                marginTop: '12px'
-              }}>
-                <div style={{ marginBottom: '12px' }}>
-                  <strong style={{ color: '#d46b08', fontSize: '15px' }}>
-                    💰 Thông tin hoàn tiền:
-                  </strong>
-                </div>
-                <ul style={{ 
-                  margin: 0, 
-                  paddingLeft: '20px',
-                  listStyle: 'disc'
-                }}>
-                  <li style={{ marginBottom: '8px' }}>
-                    Số tiền hoàn: <strong style={{ color: '#ff4d4f', fontSize: '16px' }}>
-                      {formatCurrency(cancelBookingInfo.TongTien)}
-                    </strong>
-                  </li>
-                  <li style={{ marginBottom: '8px' }}>
-                    Yêu cầu sẽ được gửi đến nhân viên xử lý
-                  </li>
-                  <li style={{ marginBottom: '8px' }}>
-                    Thời gian xử lý: <strong>1-3 ngày làm việc</strong>
-                  </li>
-                  <li>
-                    Tiền sẽ được hoàn về tài khoản của bạn
-                  </li>
-                </ul>
+            <div style={{ 
+              background: '#f0f2f5', 
+              padding: 15, 
+              borderRadius: 8,
+              marginBottom: 20 
+            }}>
+              <div style={{ marginBottom: 8 }}>
+                <strong>Chuyến:</strong> {ticketToUpdate.trip?.route?.diemDi?.TenDiaDiem} → {ticketToUpdate.trip?.route?.diemDen?.TenDiaDiem}
               </div>
-            ) : (
-              <div style={{
-                background: '#f6f6f6',
-                border: '1px solid #d9d9d9',
-                borderRadius: '8px',
-                padding: '12px',
-                marginTop: '12px',
-                color: '#666'
-              }}>
-                <Text>Đơn hàng sẽ được hủy và ghế sẽ được giải phóng.</Text>
+              <div style={{ marginBottom: 8 }}>
+                <strong>Khởi hành:</strong> {dayjs(ticketToUpdate.trip?.ThoiGianKhoiHanh).format('DD/MM/YYYY HH:mm')}
               </div>
-            )}
+              <div>
+                <strong>Ghế:</strong> <Tag color="purple">{ticketToUpdate.MaGhe}</Tag>
+              </div>
+            </div>
+
+            <Form form={form} layout="vertical">
+              <Form.Item
+                name="TenHanhKhach"
+                label="Tên hành khách"
+                rules={[
+                  { required: true, message: 'Vui lòng nhập tên!' },
+                  { min: 2, message: 'Tên phải có ít nhất 2 ký tự!' },
+                  { max: 100, message: 'Tên không được quá 100 ký tự!' }
+                ]}
+              >
+                <Input placeholder="Nguyễn Văn A" />
+              </Form.Item>
+
+              <Form.Item
+                name="SDT"
+                label="Số điện thoại"
+                rules={[
+                  { required: true, message: 'Vui lòng nhập số điện thoại!' },
+                  { pattern: /^[0-9]{10}$/, message: 'Số điện thoại phải có 10 chữ số!' }
+                ]}
+              >
+                <Input placeholder="0123456789" maxLength={10} />
+              </Form.Item>
+
+              <Form.Item
+                name="DiemDonChiTiet"
+                label="Điểm đón chi tiết"
+                rules={[
+                  { max: 200, message: 'Không được quá 200 ký tự!' }
+                ]}
+              >
+                <Input.TextArea 
+                  rows={2}
+                  placeholder="Ví dụ: 123 Lê Lợi, Quận Hải Châu"
+                  maxLength={200}
+                  showCount
+                />
+              </Form.Item>
+
+              <Form.Item
+                name="DiemTraChiTiet"
+                label="Điểm trả chi tiết"
+                rules={[
+                  { max: 200, message: 'Không được quá 200 ký tự!' }
+                ]}
+              >
+                <Input.TextArea 
+                  rows={2}
+                  placeholder="Ví dụ: Bến xe Phía Nam"
+                  maxLength={200}
+                  showCount
+                />
+              </Form.Item>
+            </Form>
+
+            <div style={{ 
+              background: '#fff7e6', 
+              border: '1px solid #ffd666',
+              padding: 12, 
+              borderRadius: 8,
+              fontSize: 13
+            }}>
+              ⚠️ <strong>Lưu ý:</strong> Bạn chỉ có thể cập nhật thông tin trước 24 giờ khởi hành.
+            </div>
           </div>
-        ) : (
-          <Spin />
         )}
       </Modal>
+{/* Modal hủy vé */}
+<Modal
+  title="⚠️ Xác nhận hủy đơn vé"
+  open={isCancelModalVisible}
+  onCancel={() => {
+    setIsCancelModalVisible(false);
+    setBookingToCancel(null);
+  }}
+  onOk={handleConfirmCancel}
+  okText="Xác nhận hủy"
+  cancelText="Không hủy"
+  okButtonProps={{ 
+    danger: true,
+    loading: cancelBookingMutation.isPending 
+  }}
+  width={500}
+  mask={false}
+  maskClosable={false}
+>
+  {bookingToCancel && (
+    <div>
+      <p style={{ fontSize: 15, marginBottom: 16 }}>
+        <strong>Bạn có chắc muốn hủy đơn vé này?</strong>
+      </p>
+      
+      <div style={{ 
+        background: '#f5f5f5', 
+        padding: 12, 
+        borderRadius: 8,
+        marginBottom: 16 
+      }}>
+        <div><strong>Mã đơn:</strong> {bookingToCancel.MaBooking}</div>
+      </div>
+
+      {bookingToCancel.TrangThaiTT === 1 && (
+        <div style={{ 
+          background: '#fff7e6', 
+          border: '1px solid #ffd666',
+          padding: 12, 
+          borderRadius: 8
+        }}>
+          ⚠️ <strong>Lưu ý:</strong> Đơn đã thanh toán. Sau khi nhân viên duyệt, số tiền sẽ được hoàn lại vào tài khoản của bạn.
+        </div>
+      )}
+    </div>
+  )}
+</Modal>
+      {/* Modal đánh giá */}
+      <ReviewModal
+        visible={isReviewModalVisible}
+        onClose={() => {
+          setIsReviewModalVisible(false);
+          setSelectedTripForReview(null);
+        }}
+        tripId={selectedTripForReview?.tripId}
+        tripInfo={selectedTripForReview}
+        mask={false}
+        maskClosable={false}
+      />
     </Layout>
   );
 };

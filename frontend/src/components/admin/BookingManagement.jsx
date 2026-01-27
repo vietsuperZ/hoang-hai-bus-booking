@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { 
   Card, Table, Button, Modal, Form, Tag, Space, 
-  Descriptions, message, Badge, Select, DatePicker, Input
+  Descriptions, message, Badge, Select, DatePicker, Input, Popconfirm, List
 } from 'antd';
 import { 
   EyeOutlined, CheckCircleOutlined, CloseCircleOutlined,
-  ReloadOutlined, SearchOutlined, FilterOutlined
+  ReloadOutlined, SearchOutlined, FilterOutlined, DeleteOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import adminService from '../../services/adminService.js';
+import api from '../../services/api';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
@@ -43,6 +44,40 @@ const BookingManagement = () => {
     }
   });
 
+  // Mutation hủy đơn
+  // Mutation hủy đơn
+const cancelBookingMutation = useMutation({
+  mutationFn: async (bookingId) => {
+    // Không cần return, chỉ cần call API
+    await api.put(`/employee/bookings/${bookingId}/cancel`);
+  },
+  onSuccess: () => {
+    message.success('Hủy đơn thành công!');
+    queryClient.invalidateQueries(['admin-bookings']);
+    setIsDetailModalVisible(false);
+  },
+  onError: (error) => {
+    message.error(error?.message || 'Hủy đơn thất bại!');
+  }
+});
+
+// Mutation hủy vé
+const cancelTicketMutation = useMutation({
+  mutationFn: async (ticketId) => {
+    await api.put(`/employee/tickets/${ticketId}/cancel`);
+  },
+  onSuccess: () => {
+    message.success('Hủy vé thành công!');
+    queryClient.invalidateQueries(['admin-bookings']);
+    if (selectedBooking) {
+      handleViewDetail({ MaDon: selectedBooking.MaDon });
+    }
+  },
+  onError: (error) => {
+    message.error(error?.message || 'Hủy vé thất bại!');
+  }
+});
+
   const bookings = bookingsData?.data || [];
 
   // Xem chi tiết đơn vé
@@ -59,6 +94,16 @@ const BookingManagement = () => {
   // Duyệt thanh toán
   const handleApprove = (bookingId) => {
     approveMutation.mutate(bookingId);
+  };
+
+  // Hủy đơn
+  const handleCancelBooking = (bookingId) => {
+    cancelBookingMutation.mutate(bookingId);
+  };
+
+  // Hủy vé
+  const handleCancelTicket = (ticketId) => {
+    cancelTicketMutation.mutate(ticketId);
   };
 
   // Đóng modal
@@ -83,7 +128,8 @@ const BookingManagement = () => {
       0: 'Chưa thanh toán',
       1: 'Đã thanh toán',
       2: 'Chờ duyệt',
-      3: 'Đã hoàn tiền'
+      3: 'Đã hoàn tiền',
+      6: 'Đã hủy'
     };
     return statusMap[status] || 'Không xác định';
   };
@@ -94,7 +140,8 @@ const BookingManagement = () => {
       'Chưa thanh toán': { color: 'default', icon: '⏳' },
       'Chờ duyệt': { color: 'processing', icon: '🔄' },
       'Đã thanh toán': { color: 'success', icon: '✅' },
-      'Đã hoàn tiền': { color: 'warning', icon: '💰' }
+      'Đã hoàn tiền': { color: 'warning', icon: '💰' },
+      'Đã hủy': { color: 'error', icon: '❌' }
     };
     
     const config = statusConfig[status] || { color: 'default', icon: '❓' };
@@ -155,35 +202,70 @@ const BookingManagement = () => {
       render: formatDateTime
     },
     {
-      title: 'Hành động',
-      key: 'action',
-      width: 200,
-      render: (_, record) => (
-        <Space>
+  title: 'Hành động',
+  key: 'action',
+  width: 250,
+  render: (_, record) => {
+    // THÊM LOG
+    console.log('==================');
+    console.log('Record:', record);
+    console.log('TrangThaiTT:', record.TrangThaiTT);
+    console.log('Type of TrangThaiTT:', typeof record.TrangThaiTT);
+    console.log('Check !== 6:', record.TrangThaiTT !== 6);
+    console.log('Check === 6:', record.TrangThaiTT === 6);
+    console.log('==================');
+    
+    return (
+      <Space>
+        <Button
+          type="primary"
+          icon={<EyeOutlined />}
+          size="small"
+          onClick={() => handleViewDetail(record)}
+        >
+          Xem
+        </Button>
+        
+        {record.TrangThaiTT === 2 && (
           <Button
             type="primary"
-            icon={<EyeOutlined />}
+            icon={<CheckCircleOutlined />}
             size="small"
-            onClick={() => handleViewDetail(record)}
+            style={{ background: '#52c41a' }}
+            onClick={() => handleApprove(record.MaDon)}
+            loading={approveMutation.isPending}
           >
-            Xem
+            Duyệt
           </Button>
-          
-          {record.TrangThaiTT === 2 && (
+        )}
+
+        {/* TEST: LUÔN HIỆN */}
+        <span style={{color: 'red', marginLeft: 10}}>
+          TEST: TT={record.TrangThaiTT}
+        </span>
+
+        {record.TrangThaiTT !== 6 && (
+          <Popconfirm
+            title="Test hủy đơn"
+            onConfirm={() => handleCancelBooking(record.MaDon)}
+            okText="Hủy đơn"
+            cancelText="Không"
+            okButtonProps={{ danger: true }}
+          >
             <Button
-              type="primary"
-              icon={<CheckCircleOutlined />}
+              danger
+              icon={<CloseCircleOutlined />}
               size="small"
-              style={{ background: '#52c41a' }}
-              onClick={() => handleApprove(record.MaDon)}
-              loading={approveMutation.isPending}
+              loading={cancelBookingMutation.isPending}
             >
-              Duyệt
+              Hủy
             </Button>
-          )}
-        </Space>
-      )
-    }
+          </Popconfirm>
+        )}
+      </Space>
+    );
+  }
+}
   ];
 
   return (
@@ -218,6 +300,7 @@ const BookingManagement = () => {
             <Option value="1">Đã thanh toán</Option>
             <Option value="2">Chờ duyệt</Option>
             <Option value="3">Đã hoàn tiền</Option>
+            <Option value="6">Đã hủy</Option>
           </Select>
         </div>
 
@@ -239,7 +322,7 @@ const BookingManagement = () => {
         open={isDetailModalVisible}
         onCancel={handleCloseModal}
         footer={null}
-        width={800}
+        width={900}
         destroyOnClose
         mask={false}
         maskClosable={false}
@@ -285,51 +368,67 @@ const BookingManagement = () => {
             {/* Danh sách vé */}
             <div style={{ marginTop: '24px' }}>
               <h3>🎫 Danh sách vé ({selectedBooking.tickets?.length || 0} vé)</h3>
-              <Table
+              
+              <List
                 dataSource={selectedBooking.tickets || []}
-                rowKey="MaVe"
-                size="small"
-                pagination={false}
-                columns={[
-                  {
-                    title: 'Mã vé',
-                    dataIndex: 'MaVe',
-                    render: (text) => <Tag>#{text}</Tag>
-                  },
-                  {
-                    title: 'Chuyến xe',
-                    key: 'trip',
-                    render: (_, record) => (
-                      <div>
-                        <div>{record.trip?.route?.diemDi?.TenDiaDiem} → {record.trip?.route?.diemDen?.TenDiaDiem}</div>
-                        <div style={{ fontSize: '12px', color: '#666' }}>
-                          {formatDateTime(record.trip?.ThoiGianKhoiHanh)}
+                renderItem={(ticket) => (
+                  <List.Item
+                    actions={[
+                      ticket.TrangThaiVe !== 2 ? (
+                        <Popconfirm
+                          title="Xác nhận hủy vé này?"
+                          onConfirm={() => handleCancelTicket(ticket.MaVe)}
+                          okText="Hủy vé"
+                          cancelText="Không"
+                          okButtonProps={{ danger: true }}
+                        >
+                          <Button
+                            danger
+                            size="small"
+                            icon={<DeleteOutlined />}
+                            loading={cancelTicketMutation.isPending}
+                          >
+                            Hủy vé
+                          </Button>
+                        </Popconfirm>
+                      ) : (
+                        <Tag color="error">Đã hủy</Tag>
+                      )
+                    ]}
+                  >
+                    <List.Item.Meta
+                      title={
+                        <Space>
+                          <Tag color="blue">Vé #{ticket.MaVe}</Tag>
+                          <Tag color="orange">Ghế {ticket.MaGhe}</Tag>
+                          {ticket.TrangThaiVe === 1 && <Tag color="success">Đã duyệt</Tag>}
+                          {ticket.TrangThaiVe === 0 && <Tag color="warning">Chờ duyệt</Tag>}
+                          {ticket.TrangThaiVe === 2 && <Tag color="error">Đã hủy</Tag>}
+                        </Space>
+                      }
+                      description={
+                        <div>
+                          <div>{ticket.trip?.route?.diemDi?.TenDiaDiem} → {ticket.trip?.route?.diemDen?.TenDiaDiem}</div>
+                          <div style={{ fontSize: '12px', color: '#666' }}>
+                            Khởi hành: {formatDateTime(ticket.trip?.ThoiGianKhoiHanh)} | Giá: {formatMoney(ticket.GiaVe)}
+                          </div>
                         </div>
-                      </div>
-                    )
-                  },
-                  {
-                    title: 'Số ghế',
-                    dataIndex: 'MaGhe',
-                    align: 'center',
-                    render: (seat) => <Tag color="blue">{seat || '---'}</Tag>
-                  },
-                  {
-                    title: 'Giá vé',
-                    dataIndex: 'GiaVe',
-                    render: (price) => formatMoney(price)
-                  }
-                ]}
+                      }
+                    />
+                  </List.Item>
+                )}
               />
             </div>
 
-            {/* Nút duyệt */}
-            {selectedBooking.TrangThaiTT === 2 && (
-              <div style={{ marginTop: '24px', textAlign: 'right' }}>
-                <Space>
-                  <Button onClick={handleCloseModal}>
-                    Đóng
-                  </Button>
+            {/* Footer modal - Nút duyệt và hủy cho TẤT CẢ trừ đã hủy */}
+            <div style={{ marginTop: '24px', textAlign: 'right' }}>
+              <Space>
+                <Button onClick={handleCloseModal}>
+                  Đóng
+                </Button>
+
+                {/* Nút Duyệt - Chỉ cho chờ duyệt */}
+                {selectedBooking.TrangThaiTT === 2 && (
                   <Button
                     type="primary"
                     icon={<CheckCircleOutlined />}
@@ -339,9 +438,32 @@ const BookingManagement = () => {
                   >
                     Duyệt thanh toán
                   </Button>
-                </Space>
-              </div>
-            )}
+                )}
+
+                {/* Nút Hủy đơn - Cho TẤT CẢ trừ đã hủy */}
+                {selectedBooking.TrangThaiTT !== 6 && (
+                  <Popconfirm
+                    title={
+                      selectedBooking.TrangThaiTT === 1 
+                        ? "Đơn đã thanh toán! Hủy sẽ hoàn tiền. Xác nhận?" 
+                        : "Xác nhận hủy đơn này?"
+                    }
+                    onConfirm={() => handleCancelBooking(selectedBooking.MaDon)}
+                    okText="Hủy đơn"
+                    cancelText="Không"
+                    okButtonProps={{ danger: true }}
+                  >
+                    <Button
+                      danger
+                      icon={<CloseCircleOutlined />}
+                      loading={cancelBookingMutation.isPending}
+                    >
+                      Hủy đơn
+                    </Button>
+                  </Popconfirm>
+                )}
+              </Space>
+            </div>
           </div>
         )}
       </Modal>

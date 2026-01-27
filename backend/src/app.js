@@ -43,6 +43,7 @@ app.use('/api/users', userRoutes);
 app.use('/api', routes);
 app.use('/api/dashboard', dashboardRoutes);
 
+
 // ==================== ERROR HANDLING ====================
 
 app.use(notFound);

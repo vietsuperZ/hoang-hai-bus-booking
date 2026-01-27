@@ -219,7 +219,7 @@ const SeatSelection = ({ totalSeats, bookedSeats = [], onSelectSeats, selectedSe
               color: 'rgba(255,255,255,0.8)', 
               fontSize: '12px' 
             }}>
-              🚗 Lái xe
+              {/* 🚗 Lái xe */}
             </div>
           </div>
         </Col>
@@ -248,7 +248,7 @@ const SeatSelection = ({ totalSeats, bookedSeats = [], onSelectSeats, selectedSe
               color: 'rgba(255,255,255,0.8)', 
               fontSize: '12px' 
             }}>
-              ⬆️ Tầng trên
+              {/* ⬆️ Tầng trên */}
             </div>
           </div>
         </Col>

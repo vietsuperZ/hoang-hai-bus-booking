@@ -54,25 +54,61 @@ const createBooking = async (req, res, next) => {
       });
     }
 
-    // Kiểm tra ghế đã được đặt chưa (CHỈ kiểm tra ghế chưa hủy)
+    // ============================================
+    // ✅ XỬ LÝ VÉ ĐÃ HỦY
+    // ============================================
+    
     const seatCodes = seats.map(s => s.MaGhe);
+    
+    // 1. Kiểm tra ghế đã được đặt (CHỈ check vé chưa hủy)
     const bookedSeats = await Ticket.findAll({
       where: {
         MaChuyen,
         MaGhe: { [Op.in]: seatCodes },
-        TrangThaiVe: { [Op.in]: [0, 1] } // CHỈ kiểm tra: Đang giữ hoặc Đã thanh toán
+        TrangThaiVe: { [Op.in]: [0, 1] } // Chỉ check: Chưa sử dụng hoặc Đã thanh toán
       },
+      attributes: ['MaGhe', 'TrangThaiVe'],
       transaction
     });
 
     if (bookedSeats.length > 0) {
       await transaction.rollback();
+      const bookedList = bookedSeats.map(s => s.MaGhe).join(', ');
       return res.status(400).json({
         success: false,
-        message: 'Một số ghế đã được đặt',
+        message: `Các ghế sau đã được đặt: ${bookedList}`,
         bookedSeats: bookedSeats.map(s => s.MaGhe)
       });
     }
+
+    // 2. Tìm và XÓA vé đã hủy (TrangThaiVe = 2)
+    const canceledSeats = await Ticket.findAll({
+      where: {
+        MaChuyen,
+        MaGhe: { [Op.in]: seatCodes },
+        TrangThaiVe: 2 // Đã hủy
+      },
+      attributes: ['MaVe', 'MaGhe'],
+      transaction
+    });
+
+    if (canceledSeats.length > 0) {
+      // Xóa vé đã hủy để cho phép đặt lại
+      const canceledVeIds = canceledSeats.map(s => s.MaVe);
+      
+      await Ticket.destroy({
+        where: {
+          MaVe: { [Op.in]: canceledVeIds }
+        },
+        transaction
+      });
+      
+      console.log(`🗑️ Đã xóa ${canceledSeats.length} vé đã hủy:`, canceledSeats.map(s => s.MaGhe));
+    }
+
+    // ============================================
+    // TIẾP TỤC TẠO ĐƠN MỚI
+    // ============================================
 
     // Tính tổng tiền
     const totalAmount = seats.length * trip.route.GiaCoBan;
@@ -80,18 +116,18 @@ const createBooking = async (req, res, next) => {
     // Tạo mã booking
     const bookingCode = await generateUniqueBookingCode(Booking);
 
-    // ===== TẤT CẢ ĐƠN ĐỀU TRẠNG THÁI 2 (CHỜ DUYỆT) =====
+    // Tạo đơn đặt vé (Trạng thái 2: Chờ duyệt)
     const booking = await Booking.create({
       MaNguoiDung,
       TongTien: totalAmount,
       GhiChuKhachHang,
       MaPTTT,
-      TrangThaiTT: 2, // ← Luôn là 2 (Chờ duyệt)
-      NgayThanhToan: new Date(), // ← Ghi ngày thanh toán luôn
+      TrangThaiTT: 2, // Chờ duyệt
+      NgayThanhToan: new Date(),
       MaBooking: bookingCode
     }, { transaction });
 
-    // Tạo các vé với trạng thái 0 (Chưa sử dụng)
+    // Tạo các vé (TrangThaiVe = 0: Chưa sử dụng)
     const ticketPromises = seats.map(seat => 
       Ticket.create({
         MaDon: booking.MaDon,
@@ -102,7 +138,7 @@ const createBooking = async (req, res, next) => {
         DiemTraChiTiet: seat.DiemTraChiTiet,
         TenHanhKhach: seat.TenHanhKhach,
         SDT: seat.SDT,
-        TrangThaiVe: 0 // ← Chưa sử dụng (chờ duyệt)
+        TrangThaiVe: 0 // Chưa sử dụng
       }, { transaction })
     );
 
@@ -110,7 +146,7 @@ const createBooking = async (req, res, next) => {
 
     await transaction.commit();
 
-    // ===== GỬI THÔNG BÁO =====
+    // Gửi thông báo
     await createNotification(
       MaNguoiDung,
       `Đặt vé ${bookingCode} thành công! Vui lòng chờ nhân viên xác nhận đơn hàng.`,
@@ -151,6 +187,7 @@ const createBooking = async (req, res, next) => {
 
   } catch (error) {
     await transaction.rollback();
+    console.error('❌ Error creating booking:', error);
     next(error);
   }
 };
@@ -655,6 +692,123 @@ const checkPaymentStatus = async (req, res, next) => {
   }
 };
 
+// @desc    Cập nhật thông tin vé
+// @route   PUT /api/bookings/ticket/:ticketId
+// @access  Private
+const updateTicketInfo = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  
+  try {
+    const { ticketId } = req.params;
+    const { TenHanhKhach, SDT, DiemDonChiTiet, DiemTraChiTiet } = req.body;
+    const MaNguoiDung = req.user.MaNguoiDung;
+
+    console.log('📝 Updating ticket info:', ticketId);
+
+    // Lấy thông tin vé
+    const [ticket] = await sequelize.query(
+      `SELECT 
+        cv.*,
+        cx.ThoiGianKhoiHanh,
+        ddv.MaNguoiDung,
+        ddv.TrangThaiTT
+       FROM ChiTietVe cv
+       JOIN DonDatVe ddv ON cv.MaDon = ddv.MaDon
+       JOIN ChuyenXe cx ON cv.MaChuyen = cx.MaChuyen
+       WHERE cv.MaVe = ?`,
+      {
+        replacements: [ticketId],
+        type: sequelize.QueryTypes.SELECT,
+        transaction
+      }
+    );
+
+    if (!ticket) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy vé'
+      });
+    }
+
+    // Check quyền sở hữu
+    if (ticket.MaNguoiDung !== MaNguoiDung) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Bạn không có quyền cập nhật vé này'
+      });
+    }
+
+    // Check trạng thái vé
+    if (ticket.TrangThaiVe !== 1) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Chỉ có thể cập nhật vé đã được duyệt'
+      });
+    }
+
+    // Check trạng thái thanh toán
+    if (ticket.TrangThaiTT !== 1) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Chỉ có thể cập nhật vé đã thanh toán'
+      });
+    }
+
+    // Check thời gian (phải trước 24h)
+    const departureTime = new Date(ticket.ThoiGianKhoiHanh);
+    const now = new Date();
+    const hoursUntilDeparture = (departureTime - now) / (1000 * 60 * 60);
+
+    if (hoursUntilDeparture < 24) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Chỉ có thể cập nhật thông tin trước 24 giờ khởi hành'
+      });
+    }
+
+    // Cập nhật thông tin
+    await sequelize.query(
+      `UPDATE ChiTietVe 
+       SET TenHanhKhach = ?,
+           SDT = ?,
+           DiemDonChiTiet = ?,
+           DiemTraChiTiet = ?
+       WHERE MaVe = ?`,
+      {
+        replacements: [
+          TenHanhKhach || ticket.TenHanhKhach,
+          SDT || ticket.SDT,
+          DiemDonChiTiet || ticket.DiemDonChiTiet,
+          DiemTraChiTiet || ticket.DiemTraChiTiet,
+          ticketId
+        ],
+        type: sequelize.QueryTypes.UPDATE,
+        transaction
+      }
+    );
+
+    await transaction.commit();
+
+    res.json({
+      success: true,
+      message: 'Cập nhật thông tin vé thành công!'
+    });
+
+  } catch (error) {
+    if (!transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error('❌ Error updating ticket:', error);
+    next(error);
+  }
+};
+
+
 const autoApproveBooking = async (req, res, next) => {
   const transaction = await sequelize.transaction();
   
@@ -719,5 +873,6 @@ module.exports = {
   autoApproveBooking,
   completeRefund,
   approveCancellation,
-  getAllBookings
+  getAllBookings,
+  updateTicketInfo
 };

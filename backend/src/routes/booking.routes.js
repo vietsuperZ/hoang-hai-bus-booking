@@ -11,7 +11,8 @@ const {
   cassoWebhook,      // THÊM
   checkPaymentStatus,
   approveCancellation,
-  completeRefund // THÊM
+  completeRefund,
+  updateTicketInfo 
 } = require('../controllers/bookingController');
 const { authenticate } = require('../middleware/authMiddleware');
 const { authorize } = require('../middleware/roleMiddleware');
@@ -32,5 +33,6 @@ router.put('/:id/approve', authenticate, authorize('Admin', 'Nhân viên'), appr
 router.put('/:id/auto-approve', authenticate, autoApproveBooking);
 router.put('/:id/approve-cancel', authenticate, approveCancellation);
 router.put('/:id/complete-refund', authenticate, completeRefund);
+router.put('/ticket/:ticketId', authenticate, updateTicketInfo);
 
 module.exports = router;

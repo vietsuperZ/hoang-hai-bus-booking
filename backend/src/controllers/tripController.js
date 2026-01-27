@@ -1,3 +1,4 @@
+const { now } = require('sequelize/lib/utils');
 const { Trip, Route, Bus, Employee, Location, Ticket, User } = require('../models');
 const { Op } = require('sequelize');
 
@@ -181,7 +182,7 @@ const getTripSeats = async (req, res, next) => {
       seatCode: t.MaGhe,
       status: t.TrangThaiVe === 1 ? 'booked' : 'holding'
     }));
-
+    
     res.status(200).json({
       success: true,
       data: {
@@ -198,36 +199,187 @@ const getTripSeats = async (req, res, next) => {
 // @desc    Tạo chuyến xe mới
 // @route   POST /api/trips
 // @access  Private/Admin
+// @desc    Tạo chuyến xe mới
+// @route   POST /api/trips
+// @access  Private/Admin
 const createTrip = async (req, res, next) => {
   try {
     const { MaTuyen, BienSoXe, ThoiGianKhoiHanh, ThoiGianDuKienDen, MaTaiXe, MaLoXe } = req.body;
+
+    // ============================================
+    // ✅ VALIDATION: Kiểm tra thời gian quá khứ
+    // ============================================
+    
+    const departureTime = new Date(ThoiGianKhoiHanh);
+    const arrivalTime = new Date(ThoiGianDuKienDen);
+    const now = new Date();
+
+    // 1. Kiểm tra thời gian khởi hành không được ở quá khứ
+    if (departureTime < now) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thời gian khởi hành không được ở quá khứ'
+      });
+    }
+
+    // 2. Kiểm tra thời gian đến phải sau thời gian khởi hành
+    if (arrivalTime <= departureTime) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thời gian dự kiến đến phải sau thời gian khởi hành'
+      });
+    }
+
+    // 3. Kiểm tra khoảng cách thời gian hợp lý (ít nhất 30 phút)
+    const timeDiff = (arrivalTime - departureTime) / (1000 * 60); // phút
+    if (timeDiff < 30) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thời gian hành trình phải ít nhất 30 phút'
+      });
+    }
+
+    // ============================================
+    // VALIDATION: Kiểm tra tuyến, xe, tài xế
+    // ============================================
+
+    // 4. Kiểm tra tuyến tồn tại
+    const route = await Route.findByPk(MaTuyen);
+    if (!route) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy tuyến đường'
+      });
+    }
+
+    // 5. Kiểm tra xe tồn tại
+    const bus = await Bus.findByPk(BienSoXe);
+    if (!bus) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy xe'
+      });
+    }
+
+    // 6. Kiểm tra tài xế (nếu có)
+    if (MaTaiXe) {
+      const driver = await Employee.findByPk(MaTaiXe);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: 'Không tìm thấy tài xế'
+        });
+      }
+    }
+
+    // 7. Kiểm tra phụ xe (nếu có)
+    if (MaLoXe) {
+      const assistant = await Employee.findByPk(MaLoXe);
+      if (!assistant) {
+        return res.status(404).json({
+          success: false,
+          message: 'Không tìm thấy phụ xe'
+        });
+      }
+    }
+
+    // ============================================
+    // VALIDATION: Kiểm tra trùng lịch
+    // ============================================
+
+    // 8. Kiểm tra xe có bị trùng lịch không
+    const conflictingTrips = await Trip.findAll({
+      where: {
+        BienSoXe,
+        [Op.or]: [
+          {
+            // Chuyến mới bắt đầu trong khoảng thời gian của chuyến cũ
+            ThoiGianKhoiHanh: {
+              [Op.lte]: departureTime
+            },
+            ThoiGianDuKienDen: {
+              [Op.gt]: departureTime
+            }
+          },
+          {
+            // Chuyến mới kết thúc trong khoảng thời gian của chuyến cũ
+            ThoiGianKhoiHanh: {
+              [Op.lt]: arrivalTime
+            },
+            ThoiGianDuKienDen: {
+              [Op.gte]: arrivalTime
+            }
+          },
+          {
+            // Chuyến mới bao trùm chuyến cũ
+            ThoiGianKhoiHanh: {
+              [Op.gte]: departureTime
+            },
+            ThoiGianDuKienDen: {
+              [Op.lte]: arrivalTime
+            }
+          }
+        ]
+      }
+    });
+
+    if (conflictingTrips.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Xe đã có lịch trình trong khoảng thời gian này'
+      });
+    }
+
+    // ============================================
+    // TẠO CHUYẾN XE
+    // ============================================
 
     const trip = await Trip.create({
       MaTuyen,
       BienSoXe,
       ThoiGianKhoiHanh,
       ThoiGianDuKienDen,
-      MaTaiXe,
-      MaLoXe
+      MaTaiXe: MaTaiXe || null,
+      MaLoXe: MaLoXe || null
     });
 
     const tripWithDetails = await Trip.findByPk(trip.MaChuyen, {
       include: [
-        { model: Route, as: 'route' },
-        { model: Bus, as: 'bus' }
+        {
+          model: Route,
+          as: 'route',
+          include: [
+            { model: Location, as: 'diemDi' },
+            { model: Location, as: 'diemDen' }
+          ]
+        },
+        { model: Bus, as: 'bus' },
+        { 
+          model: Employee, 
+          as: 'driver',
+          include: [{ model: User, as: 'user', attributes: ['HoTen'] }]
+        },
+        { 
+          model: Employee, 
+          as: 'assistant',
+          include: [{ model: User, as: 'user', attributes: ['HoTen'] }]
+        }
       ]
     });
-
+    
     res.status(201).json({
       success: true,
       message: 'Tạo chuyến xe thành công',
       data: tripWithDetails
     });
+      
   } catch (error) {
     next(error);
   }
 };
-
+// @desc    Cập nhật chuyến xe
+// @route   PUT /api/trips/:id
+// @access  Private/Admin
 // @desc    Cập nhật chuyến xe
 // @route   PUT /api/trips/:id
 // @access  Private/Admin
@@ -244,6 +396,38 @@ const updateTrip = async (req, res, next) => {
 
     const { ThoiGianKhoiHanh, ThoiGianDuKienDen, MaTaiXe, MaLoXe } = req.body;
 
+    // ============================================
+    // ✅ VALIDATION khi cập nhật
+    // ============================================
+
+    const departureTime = ThoiGianKhoiHanh ? new Date(ThoiGianKhoiHanh) : trip.ThoiGianKhoiHanh;
+    const arrivalTime = ThoiGianDuKienDen ? new Date(ThoiGianDuKienDen) : trip.ThoiGianDuKienDen;
+    const now = new Date();
+
+    // 1. Không cho sửa chuyến đã khởi hành
+    if (trip.ThoiGianKhoiHanh < now) {
+      return res.status(400).json({
+        success: false,
+        message: 'Không thể sửa chuyến xe đã khởi hành'
+      });
+    }
+
+    // 2. Thời gian khởi hành mới không được quá khứ
+    if (ThoiGianKhoiHanh && departureTime < now) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thời gian khởi hành không được ở quá khứ'
+      });
+    }
+
+    // 3. Thời gian đến phải sau thời gian khởi hành
+    if (arrivalTime <= departureTime) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thời gian dự kiến đến phải sau thời gian khởi hành'
+      });
+    }
+
     await trip.update({
       ThoiGianKhoiHanh: ThoiGianKhoiHanh || trip.ThoiGianKhoiHanh,
       ThoiGianDuKienDen: ThoiGianDuKienDen || trip.ThoiGianDuKienDen,
@@ -251,10 +435,29 @@ const updateTrip = async (req, res, next) => {
       MaLoXe: MaLoXe !== undefined ? MaLoXe : trip.MaLoXe
     });
 
+    const updatedTrip = await Trip.findByPk(trip.MaChuyen, {
+      include: [
+        {
+          model: Route,
+          as: 'route',
+          include: [
+            { model: Location, as: 'diemDi' },
+            { model: Location, as: 'diemDen' }
+          ]
+        },
+        { model: Bus, as: 'bus' },
+        { 
+          model: Employee, 
+          as: 'driver',
+          include: [{ model: User, as: 'user', attributes: ['HoTen'] }]
+        }
+      ]
+    });
+
     res.status(200).json({
       success: true,
       message: 'Cập nhật chuyến xe thành công',
-      data: trip
+      data: updatedTrip
     });
   } catch (error) {
     next(error);

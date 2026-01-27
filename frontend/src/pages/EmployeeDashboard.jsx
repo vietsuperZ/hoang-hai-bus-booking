@@ -335,30 +335,31 @@ const cancelTicketMutation = useMutation({
         Xem
       </Button>
       
-      {/* ===== CHỈ HIỆN KHI TRẠNG THÁI 2 ===== */}
+      {/* Duyệt - Chỉ cho trạng thái 2 */}
       {record.TrangThaiTT === 2 && (
-        <>
-          <Button
-            type="primary"
-            icon={<CheckCircleOutlined />}
-            size="small"
-            style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}
-            onClick={() => handleApprovePayment(record.MaDon)}
-            loading={approvePaymentMutation.isPending}
-          >
-            Duyệt
-          </Button>
-          
-          <Button
-            danger
-            icon={<CloseCircleOutlined />}
-            size="small"
-            onClick={() => handleCancelBooking(record.MaDon)}
-            loading={cancelBookingMutation.isPending}
-          >
-            Hủy
-          </Button>
-        </>
+        <Button
+          type="primary"
+          icon={<CheckCircleOutlined />}
+          size="small"
+          style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}
+          onClick={() => handleApprovePayment(record.MaDon)}
+          loading={approvePaymentMutation.isPending}
+        >
+          Duyệt
+        </Button>
+      )}
+
+      {/* Hủy - Cho TẤT CẢ trừ đã hủy (6) và đã hoàn tiền (5) */}
+      {record.TrangThaiTT !== 6 && record.TrangThaiTT !== 5 && (
+        <Button
+          danger
+          icon={<CloseCircleOutlined />}
+          size="small"
+          onClick={() => handleCancelBooking(record.MaDon)}
+          loading={cancelBookingMutation.isPending}
+        >
+          Hủy
+        </Button>
       )}
 
       {/* Duyệt hủy cho trạng thái 3 */}
@@ -588,23 +589,42 @@ const cancelTicketMutation = useMutation({
                     render: (status) => renderTicketStatus(status)
                   },
                   {
-                    title: 'Hành động',
-                    key: 'action',
-                    align: 'center',
-                    render: (_, record) => (
-                      selectedBooking?.TrangThaiTT === 2 && record.TrangThaiVe === 0 && (
-                        <Button
-                          danger
-                          size="small"
-                          icon={<CloseCircleOutlined />}
-                          onClick={() => handleCancelTicket(record.MaVe)}
-                          loading={cancelTicketMutation.isPending}
-                        >
-                          Hủy vé
-                        </Button>
-                      )
-                    )
-                  }
+  title: 'Hành động',
+  key: 'action',
+  align: 'center',
+  width: 120,
+  render: (_, record) => {
+    const bookingStatus = selectedBooking?.TrangThaiTT;
+    const ticketStatus = record.TrangThaiVe;
+
+    // Vé đã hủy → hiện tag
+    if (ticketStatus === 2) {
+      return <Tag color="error">Đã hủy</Tag>;
+    }
+
+    // Đơn đã hủy hoặc đã hoàn tiền → không hiện gì
+    if (bookingStatus === 6 || bookingStatus === 5) {
+      return null;
+    }
+
+    // Đơn đã thanh toán hoặc chờ duyệt → cho phép hủy vé
+    if (bookingStatus === 1 || bookingStatus === 2) {
+      return (
+        <Button
+          danger
+          size="small"
+          icon={<CloseCircleOutlined />}
+          onClick={() => handleCancelTicket(record.MaVe)}
+          loading={cancelTicketMutation.isPending}
+        >
+          Hủy vé
+        </Button>
+      );
+    }
+
+    return null;
+  }
+}
                 ]}
               />
             </div>

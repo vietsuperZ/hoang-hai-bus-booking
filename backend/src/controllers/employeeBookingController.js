@@ -231,7 +231,10 @@ const cancelBooking = async (req, res, next) => {
   
   try {
     const bookingId = parseInt(req.params.id);
+    const employeeId = req.user?.MaNhanVien || null;
     
+    console.log('❌ Cancelling booking:', bookingId);
+
     const [booking] = await sequelize.query(
       'SELECT * FROM DonDatVe WHERE MaDon = ?',
       {
@@ -249,14 +252,27 @@ const cancelBooking = async (req, res, next) => {
       });
     }
 
-    if (booking.TrangThaiTT !== 2) {
-      await transaction.rollback();
-      return res.status(400).json({
-        success: false,
-        message: 'Chỉ có thể hủy đơn đang chờ duyệt'
-      });
-    }
+    // ===== CHỈ CHẶN ĐƠN ĐÃ HỦY =====
+    // CHỈ CHẶN ĐƠN ĐÃ HỦY
+if (booking.TrangThaiTT === 6) {
+  await transaction.rollback();
+  return res.status(400).json({
+    success: false,
+    message: 'Đơn đã bị hủy trước đó'
+  });
+}
 
+    // Lấy danh sách vé chưa bị hủy trong đơn
+    const tickets = await sequelize.query(
+      'SELECT * FROM ChiTietVe WHERE MaDon = ? AND TrangThaiVe != 2',
+      {
+        replacements: [bookingId],
+        type: sequelize.QueryTypes.SELECT,
+        transaction
+      }
+    );
+
+    // Hủy đơn
     await sequelize.query(
       'UPDATE DonDatVe SET TrangThaiTT = 6 WHERE MaDon = ?',
       {
@@ -266,8 +282,9 @@ const cancelBooking = async (req, res, next) => {
       }
     );
 
+    // Hủy tất cả vé chưa bị hủy
     await sequelize.query(
-      'UPDATE ChiTietVe SET TrangThaiVe = 2 WHERE MaDon = ?',
+      'UPDATE ChiTietVe SET TrangThaiVe = 2 WHERE MaDon = ? AND TrangThaiVe != 2',
       {
         replacements: [bookingId],
         type: sequelize.QueryTypes.UPDATE,
@@ -275,22 +292,72 @@ const cancelBooking = async (req, res, next) => {
       }
     );
 
+    // ===== TẠO GIAO DỊCH HOÀN TIỀN =====
+    let totalRefund = 0;
+    if (booking.TrangThaiTT === 1) { // Nếu đơn đã duyệt
+      for (const ticket of tickets) {
+        const [existingRefund] = await sequelize.query(
+          'SELECT * FROM GiaoDichHoanTien WHERE MaVe = ?',
+          {
+            replacements: [ticket.MaVe],
+            type: sequelize.QueryTypes.SELECT,
+            transaction
+          }
+        );
+
+        if (!existingRefund) {
+          await sequelize.query(
+            `INSERT INTO GiaoDichHoanTien 
+             (MaVe, SoTienHoan, TrangThai, GhiChu, NhanVienXuLy_ID) 
+             VALUES (?, ?, ?, ?, ?)`,
+            {
+              replacements: [
+                ticket.MaVe,
+                ticket.GiaVe,
+                1,
+                `Hoàn tiền do hủy đơn ${booking.MaBooking} bởi nhân viên`,
+                employeeId
+              ],
+              type: sequelize.QueryTypes.INSERT,
+              transaction
+            }
+          );
+          totalRefund += parseFloat(ticket.GiaVe);
+        }
+      }
+    }
+
     await transaction.commit();
 
+    // ===== GỬI THÔNG BÁO =====
     try {
       const { default: Notification } = await import('../models/Notification.js');
-      await Notification.create({
-        MaNguoiDung: booking.MaNguoiDung,
-        NoiDung: `Đơn vé ${booking.MaBooking} đã bị hủy bởi nhân viên.`,
-        LoaiThongBao: 'BOOKING_CANCELLED'
-      });
+      
+      if (totalRefund > 0) {
+        await Notification.create({
+          MaNguoiDung: booking.MaNguoiDung,
+          NoiDung: `💰 Đơn vé ${booking.MaBooking} đã bị hủy. Số tiền ${totalRefund.toLocaleString('vi-VN')}đ đã được hoàn vào tài khoản của bạn.`,
+          LoaiThongBao: 'BOOKING_CANCELLED_REFUND'
+        });
+      } else {
+        await Notification.create({
+          MaNguoiDung: booking.MaNguoiDung,
+          NoiDung: `Đơn vé ${booking.MaBooking} đã bị hủy bởi nhân viên.`,
+          LoaiThongBao: 'BOOKING_CANCELLED'
+        });
+      }
     } catch (notifError) {
       console.error('❌ Notification error:', notifError);
     }
 
     res.json({
       success: true,
-      message: 'Đã hủy đơn hàng thành công'
+      message: 'Đã hủy đơn hàng thành công',
+      data: {
+        bookingId: bookingId,
+        ticketsCancelled: tickets.length,
+        totalRefund: totalRefund
+      }
     });
 
   } catch (error) {
@@ -518,11 +585,260 @@ const cancelTicket = async (req, res, next) => {
   }
 };
 
+// ===== THÊM CÁC FUNCTION MỚI =====
+
+// @desc    Lấy danh sách chuyến xe theo ngày
+// @route   GET /api/employee/trips
+// @access  Private (Employee, Admin)
+const getTrips = async (req, res, next) => {
+  try {
+    const { date } = req.query;
+
+    console.log('🔍 Getting trips for date:', date);
+
+    let whereClause = 'WHERE 1=1';
+    let replacements = [];
+
+    if (date) {
+      whereClause += ' AND DATE(cx.ThoiGianKhoiHanh) = ?';
+      replacements.push(date);
+    }
+
+    const trips = await sequelize.query(
+      `SELECT 
+        cx.MaChuyen,
+        cx.ThoiGianKhoiHanh,
+        cx.ThoiGianDuKienDen,
+        CONCAT(dd1.TenDiaDiem, ' - ', dd2.TenDiaDiem) AS TenTuyen,
+        dd1.TenDiaDiem AS DiemDi,
+        dd2.TenDiaDiem AS DiemDen,
+        td.KhoangCach,
+        x.BienSoXe,
+        x.LoaiXe,
+        x.SoLuongGhe,
+        nd.HoTen AS TenTaiXe,
+        nd.SDT AS SDTTaiXe,
+        (SELECT COUNT(*) FROM ChiTietVe cv 
+         WHERE cv.MaChuyen = cx.MaChuyen AND cv.TrangThaiVe = 1) AS SoKhachDaDuyet,
+        (SELECT COUNT(*) FROM ChiTietVe cv 
+         INNER JOIN DonDatVe ddv ON cv.MaDon = ddv.MaDon
+         WHERE cv.MaChuyen = cx.MaChuyen AND cv.TrangThaiVe = 0 AND ddv.TrangThaiTT = 2) AS SoKhachChoXuLy
+      FROM ChuyenXe cx
+      JOIN TuyenDuong td ON cx.MaTuyen = td.MaTuyen
+      JOIN DiaDiem dd1 ON td.DiemDi_ID = dd1.MaDiaDiem
+      JOIN DiaDiem dd2 ON td.DiemDen_ID = dd2.MaDiaDiem
+      JOIN Xe x ON cx.BienSoXe = x.BienSoXe
+      LEFT JOIN NguoiDung nd ON cx.MaTaiXe = nd.MaNguoiDung
+      ${whereClause}
+      ORDER BY cx.ThoiGianKhoiHanh ASC`,
+      {
+        replacements,
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+
+    res.json({
+      success: true,
+      data: trips
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting trips:', error);
+    next(error);
+  }
+};
+
+// @desc    Lấy chi tiết chuyến xe + danh sách đơn vé
+// @route   GET /api/employee/trips/:id
+// @access  Private (Employee, Admin)
+const getTripDetail = async (req, res, next) => {
+  try {
+    const { id: tripId } = req.params;
+
+    console.log('🔍 Getting trip detail:', tripId);
+
+    const [trip] = await sequelize.query(
+      `SELECT 
+        cx.MaChuyen,
+        cx.ThoiGianKhoiHanh,
+        cx.ThoiGianDuKienDen,
+        td.MaTuyen,
+        CONCAT(dd1.TenDiaDiem, ' - ', dd2.TenDiaDiem) AS TenTuyen,
+        dd1.TenDiaDiem AS DiemDi,
+        dd2.TenDiaDiem AS DiemDen,
+        td.KhoangCach,
+        td.ThoiGianDuKien,
+        td.GiaCoBan,
+        x.BienSoXe,
+        x.LoaiXe,
+        x.SoLuongGhe,
+        nd.HoTen AS TenTaiXe,
+        nd.SDT AS SDTTaiXe,
+        nd.Email AS EmailTaiXe
+      FROM ChuyenXe cx
+      JOIN TuyenDuong td ON cx.MaTuyen = td.MaTuyen
+      JOIN DiaDiem dd1 ON td.DiemDi_ID = dd1.MaDiaDiem
+      JOIN DiaDiem dd2 ON td.DiemDen_ID = dd2.MaDiaDiem
+      JOIN Xe x ON cx.BienSoXe = x.BienSoXe
+      LEFT JOIN NguoiDung nd ON cx.MaTaiXe = nd.MaNguoiDung
+      WHERE cx.MaChuyen = ?`,
+      {
+        replacements: [tripId],
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+
+    if (!trip) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy chuyến xe'
+      });
+    }
+
+    // ===== HIỆN CẢ ĐƠN CHỜ DUYỆT VÀ ĐÃ DUYỆT =====
+    const bookings = await sequelize.query(
+      `SELECT 
+        ddv.MaDon,
+        ddv.MaNguoiDung,
+        ddv.NgayDat,
+        ddv.TongTien,
+        ddv.GhiChuKhachHang,
+        ddv.TrangThaiTT,
+        ddv.MaBooking,
+        u.HoTen AS NguoiDat,
+        u.Email,
+        u.SDT,
+        GROUP_CONCAT(DISTINCT cv.MaVe ORDER BY cv.MaVe) AS DanhSachVe,
+        GROUP_CONCAT(DISTINCT cv.MaGhe ORDER BY cv.MaGhe) AS DanhSachGhe,
+        GROUP_CONCAT(DISTINCT cv.TenHanhKhach ORDER BY cv.MaGhe SEPARATOR ' | ') AS DanhSachTenKhach,
+        GROUP_CONCAT(DISTINCT cv.TrangThaiVe ORDER BY cv.MaGhe) AS DanhSachTrangThaiVe,
+        COUNT(cv.MaVe) AS SoVe
+      FROM DonDatVe ddv
+      JOIN NguoiDung u ON ddv.MaNguoiDung = u.MaNguoiDung
+      JOIN ChiTietVe cv ON ddv.MaDon = cv.MaDon
+      WHERE cv.MaChuyen = ? AND ddv.TrangThaiTT IN (1, 2)
+      GROUP BY ddv.MaDon
+      ORDER BY ddv.TrangThaiTT ASC, ddv.NgayDat DESC`,
+      {
+        replacements: [tripId],
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+
+    const formattedBookings = bookings.map(booking => {
+      const veArray = booking.DanhSachVe ? booking.DanhSachVe.split(',') : [];
+      const gheArray = booking.DanhSachGhe ? booking.DanhSachGhe.split(',') : [];
+      const tenArray = booking.DanhSachTenKhach ? booking.DanhSachTenKhach.split(' | ') : [];
+      const trangThaiArray = booking.DanhSachTrangThaiVe ? booking.DanhSachTrangThaiVe.split(',').map(Number) : [];
+      
+      return {
+        ...booking,
+        DanhSachVe: veArray,
+        DanhSachGhe: gheArray,
+        DanhSachTenKhach: tenArray,
+        DanhSachTrangThaiVe: trangThaiArray
+      };
+    });
+
+    trip.bookings = formattedBookings;
+
+    res.json({
+      success: true,
+      data: trip
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting trip detail:', error);
+    next(error);
+  }
+};
+// @desc    Lấy thông tin in danh sách khách
+// @route   GET /api/employee/trips/:id/print
+// @access  Private (Employee, Admin)
+const getPrintInfo = async (req, res, next) => {
+  try {
+    const { id: tripId } = req.params;
+
+    console.log('🖨️ Getting print info for trip:', tripId);
+
+    const [trip] = await sequelize.query(
+      `SELECT 
+        cx.MaChuyen,
+        cx.ThoiGianKhoiHanh,
+        cx.ThoiGianDuKienDen,
+        CONCAT(dd1.TenDiaDiem, ' - ', dd2.TenDiaDiem) AS TenTuyen,
+        dd1.TenDiaDiem AS DiemDi,
+        dd2.TenDiaDiem AS DiemDen,
+        td.KhoangCach,
+        x.BienSoXe,
+        x.LoaiXe,
+        x.SoLuongGhe,
+        nd.HoTen AS TenTaiXe,
+        nd.SDT AS SDTTaiXe
+      FROM ChuyenXe cx
+      JOIN TuyenDuong td ON cx.MaTuyen = td.MaTuyen
+      JOIN DiaDiem dd1 ON td.DiemDi_ID = dd1.MaDiaDiem
+      JOIN DiaDiem dd2 ON td.DiemDen_ID = dd2.MaDiaDiem
+      JOIN Xe x ON cx.BienSoXe = x.BienSoXe
+      LEFT JOIN NguoiDung nd ON cx.MaTaiXe = nd.MaNguoiDung
+      WHERE cx.MaChuyen = ?`,
+      {
+        replacements: [tripId],
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+
+    if (!trip) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy chuyến xe'
+      });
+    }
+
+    const passengers = await sequelize.query(
+      `SELECT 
+        cv.MaVe,
+        cv.MaGhe,
+        cv.TenHanhKhach,
+        cv.SDT,
+        cv.DiemDonChiTiet,
+        cv.DiemTraChiTiet,
+        cv.GiaVe
+      FROM ChiTietVe cv
+      WHERE cv.MaChuyen = ? AND cv.TrangThaiVe = 1
+      ORDER BY cv.MaGhe ASC`,
+      {
+        replacements: [tripId],
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+
+    const totalRevenue = passengers.reduce((sum, p) => sum + parseFloat(p.GiaVe), 0);
+
+    trip.passengers = passengers;
+    trip.totalPassengers = passengers.length;
+    trip.totalRevenue = totalRevenue;
+
+    res.json({
+      success: true,
+      data: trip
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting print info:', error);
+    next(error);
+  }
+};
+
+// ===== CẬP NHẬT MODULE.EXPORTS =====
 module.exports = {
   getAllBookings,
   getBookingDetail,
   approvePayment,
   cancelBooking,
   cancelTicket,
-  updateTicketStatus
+  updateTicketStatus,
+  getTrips,          // ← THÊM
+  getTripDetail,     // ← THÊM
+  getPrintInfo       // ← THÊM
 };

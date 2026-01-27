@@ -12,6 +12,7 @@ const employeeRoutes = require('./employeeBookingRoutes'); // ← Đúng tên fi
 const refundRoutes = require('./refund.routes');
 const notificationRoutes = require('./notification.routes');
 const driverRoutes = require('./driver.routes');
+const reviewRoutes = require('./review.routes'); 
 // Health check
 router.get('/', (req, res) => {
   res.json({
@@ -33,5 +34,6 @@ router.use('/employee', employeeRoutes); // ← Vì file đã có /bookings tron
 router.use('/employee/refunds', refundRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/driver', driverRoutes);
+router.use('/reviews', reviewRoutes); 
 
 module.exports = router;

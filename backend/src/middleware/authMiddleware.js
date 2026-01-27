@@ -64,4 +64,35 @@ const authenticate = async (req, res, next) => {
   }
 };
 
-module.exports = { authenticate };
+// ===== THÊM FUNCTION AUTHORIZE =====
+const authorize = (...allowedRoles) => {
+  return (req, res, next) => {
+    // Kiểm tra user đã authenticate chưa
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Chưa xác thực'
+      });
+    }
+
+    // Lấy danh sách roles của user
+    const userRoles = req.user.roles?.map(r => r.TenVaiTro) || [];
+    
+    // Kiểm tra user có role được phép không
+    const hasRole = allowedRoles.some(role => userRoles.includes(role));
+
+    if (!hasRole) {
+      return res.status(403).json({
+        success: false,
+        message: 'Không có quyền truy cập'
+      });
+    }
+
+    next();
+  };
+};
+
+module.exports = { 
+  authenticate,
+  authorize  // ← THÊM EXPORT
+};

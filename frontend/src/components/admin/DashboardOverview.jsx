@@ -6,13 +6,11 @@ import {
   CarOutlined,
   UserOutlined,
   RiseOutlined,
-  TrophyOutlined,
-  CreditCardOutlined
+  TrophyOutlined
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { 
-  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
 import adminService from '../../services/adminService';
 import dayjs from 'dayjs';
@@ -40,16 +38,9 @@ const DashboardOverview = () => {
     queryFn: () => adminService.getTopRoutes()
   });
 
-  // Fetch payment methods
-  const { data: paymentMethodsData } = useQuery({
-    queryKey: ['dashboard-payment-methods'],
-    queryFn: () => adminService.getPaymentMethodStats()
-  });
-
   const overview = overviewData?.data || {};
   const revenueChart = revenueChartData?.data || [];
   const topRoutes = topRoutesData?.data || [];
-  const paymentMethods = paymentMethodsData?.data || [];
 
   // Format tiền
   const formatCurrency = (value) => {
@@ -58,9 +49,6 @@ const DashboardOverview = () => {
       currency: 'VND'
     }).format(value || 0);
   };
-
-  // Màu cho biểu đồ
-  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
   // Lấy doanh thu theo loại
   const getRevenueByType = () => {
@@ -185,9 +173,9 @@ const DashboardOverview = () => {
         </Col>
       </Row>
 
-      {/* Biểu đồ doanh thu */}
+      {/* Biểu đồ doanh thu - FULL WIDTH */}
       <Row gutter={[16, 16]} style={{ marginTop: '24px' }}>
-        <Col xs={24} lg={16}>
+        <Col span={24}>
           <Card
             title={
               <span>
@@ -195,14 +183,14 @@ const DashboardOverview = () => {
               </span>
             }
           >
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={350}>
               <LineChart data={revenueChart.map(item => ({
                 date: dayjs(item.date).format('DD/MM'),
                 revenue: parseFloat(item.revenue)
               }))}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="date" />
-                <YAxis tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`} />
+                <YAxis tickFormatter={(value) => `${(value / 1000000).toFixed(0)}M`} />
                 <Tooltip 
                   formatter={(value) => formatCurrency(value)}
                   labelFormatter={(label) => `Ngày: ${label}`}
@@ -212,44 +200,12 @@ const DashboardOverview = () => {
                   type="monotone" 
                   dataKey="revenue" 
                   stroke="#1890ff" 
-                  strokeWidth={2}
+                  strokeWidth={3}
                   name="Doanh thu"
-                  dot={{ fill: '#1890ff' }}
+                  dot={{ fill: '#1890ff', r: 4 }}
+                  activeDot={{ r: 6 }}
                 />
               </LineChart>
-            </ResponsiveContainer>
-          </Card>
-        </Col>
-
-        <Col xs={24} lg={8}>
-          <Card
-            title={
-              <span>
-                <CreditCardOutlined /> Phương thức thanh toán
-              </span>
-            }
-          >
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={paymentMethods.map(item => ({
-                    name: item.name,
-                    value: parseFloat(item.total)
-                  }))}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {paymentMethods.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value) => formatCurrency(value)} />
-              </PieChart>
             </ResponsiveContainer>
           </Card>
         </Col>

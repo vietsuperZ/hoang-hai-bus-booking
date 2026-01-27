@@ -1,13 +1,31 @@
-import { Layout, Button, Card, Row, Col } from 'antd';
-import { SafetyOutlined, ClockCircleOutlined, CustomerServiceOutlined, DollarOutlined } from '@ant-design/icons';
+import { Layout, Button, Card, Row, Col, Rate, Avatar, Spin } from 'antd';
+import { SafetyOutlined, ClockCircleOutlined, CustomerServiceOutlined, DollarOutlined, StarOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import dayjs from 'dayjs';
 import Header from '../components/common/Header';
 import Footer from '../components/common/Footer';
+import api from '../services/api';
 
 const { Content } = Layout;
 
 const Home = () => {
   const navigate = useNavigate();
+
+  // Lấy đánh giá mới nhất
+  const { data: latestReviews, isLoading: reviewsLoading } = useQuery({
+    queryKey: ['latest-reviews'],
+    queryFn: async () => {
+      try {
+        // Lấy tất cả đánh giá, sort theo ngày mới nhất
+        const response = await api.get('/reviews/latest'); // Cần tạo API này
+        return response.data || [];
+      } catch (error) {
+        console.error('Error fetching reviews:', error);
+        return [];
+      }
+    }
+  });
 
   const features = [
     {
@@ -98,8 +116,149 @@ const Home = () => {
           </Row>
         </div>
 
+        {/* Reviews Section - MỚI */}
+<div style={{ padding: '80px 50px', background: 'white' }}>
+  <h2 style={{ textAlign: 'center', fontSize: '36px', marginBottom: '10px' }}>
+    <StarOutlined style={{ color: '#faad14' }} /> Đánh giá từ khách hàng
+  </h2>
+  <p style={{ textAlign: 'center', fontSize: '16px', color: '#666', marginBottom: '50px' }}>
+    Hơn 10,000+ khách hàng hài lòng với dịch vụ của chúng tôi
+  </p>
+  
+  {reviewsLoading ? (
+    <div style={{ textAlign: 'center', padding: '50px' }}>
+      <Spin size="large" />
+    </div>
+  ) : latestReviews && latestReviews.length > 0 ? (
+    <Row gutter={[24, 24]} justify="center">
+      {latestReviews.slice(0, 6).map((review, index) => (
+        <Col xs={24} sm={12} md={8} key={index}>
+          <Card 
+            style={{ 
+              borderRadius: '12px',
+              height: '100%',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+              transition: 'all 0.3s ease',
+              border: '1px solid #f0f0f0'
+            }}
+            hoverable
+          >
+            {/* Header với avatar và tên */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              marginBottom: '15px',
+              paddingBottom: '15px',
+              borderBottom: '1px solid #f0f0f0'
+            }}>
+              <Avatar 
+                size={48}
+                icon={<UserOutlined />}
+                style={{ 
+                  backgroundColor: '#1890ff',
+                  marginRight: '12px'
+                }}
+              />
+              <div style={{ flex: 1 }}>
+                <div style={{ 
+                  fontWeight: 'bold', 
+                  fontSize: '15px',
+                  marginBottom: '4px'
+                }}>
+                  {review.HoTen}
+                </div>
+                <Rate 
+                  disabled 
+                  value={review.DiemSo} 
+                  style={{ fontSize: 14 }} 
+                />
+              </div>
+            </div>
+
+            {/* Thông tin chuyến xe */}
+            <div style={{ 
+              background: '#f5f5f5', 
+              padding: '10px 12px',
+              borderRadius: '8px',
+              marginBottom: '12px'
+            }}>
+              <div style={{ 
+                fontSize: '13px', 
+                color: '#1890ff',
+                fontWeight: '500',
+                marginBottom: '4px'
+              }}>
+                🚌 {review.TenTuyen}
+              </div>
+              <div style={{ fontSize: '12px', color: '#999' }}>
+                {dayjs(review.ThoiGianKhoiHanh).format('DD/MM/YYYY')}
+              </div>
+            </div>
+
+            {/* Nội dung đánh giá */}
+            <p style={{ 
+              color: '#666', 
+              fontSize: '14px',
+              minHeight: '60px',
+              lineHeight: '1.6',
+              fontStyle: review.NoiDung ? 'normal' : 'italic',
+              marginBottom: '12px'
+            }}>
+              {review.NoiDung && review.NoiDung.length > 100 
+                ? `"${review.NoiDung.substring(0, 100)}..."` 
+                : review.NoiDung 
+                  ? `"${review.NoiDung}"`
+                  : 'Khách hàng hài lòng với dịch vụ'}
+            </p>
+
+            {/* Ngày đánh giá */}
+            <div style={{ 
+              fontSize: '12px', 
+              color: '#999',
+              textAlign: 'right'
+            }}>
+              📅 {dayjs(review.NgayDanhGia).format('DD/MM/YYYY')}
+            </div>
+          </Card>
+        </Col>
+      ))}
+    </Row>
+  ) : (
+    <div style={{ 
+      textAlign: 'center', 
+      padding: '80px 20px',
+      background: '#fafafa',
+      borderRadius: '12px'
+    }}>
+      <StarOutlined style={{ 
+        fontSize: '64px', 
+        marginBottom: '20px',
+        color: '#faad14'
+      }} />
+      <h3 style={{ 
+        fontSize: '20px', 
+        color: '#666',
+        marginBottom: '10px'
+      }}>
+        Chưa có đánh giá nào
+      </h3>
+      <p style={{ color: '#999' }}>
+        Hãy là người đầu tiên đánh giá dịch vụ của chúng tôi!
+      </p>
+      <Button 
+        type="primary" 
+        size="large"
+        style={{ marginTop: '20px' }}
+        onClick={() => navigate('/search')}
+      >
+        Đặt vé ngay
+      </Button>
+    </div>
+  )}
+</div>
+
         {/* Popular Routes Section */}
-        <div style={{ padding: '80px 50px', background: 'white' }}>
+        <div style={{ padding: '80px 50px', background: '#f0f2f5' }}>
           <h2 style={{ textAlign: 'center', fontSize: '36px', marginBottom: '50px' }}>
             Tuyến đường phổ biến
           </h2>

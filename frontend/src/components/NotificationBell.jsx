@@ -18,13 +18,16 @@ const NotificationBell = () => {
     queryKey: ['notifications'],
     queryFn: async () => {
       const res = await api.get('/notifications?limit=10');
-      // Interceptor đã unwrap response.data
-      // Backend trả về array trực tiếp
       return Array.isArray(res) ? res : [];
     },
     refetchInterval: 30000,
     enabled: true
   });
+
+  // FIX: Check cả false và 0
+  const unreadCount = notifications?.filter(n => 
+    n.TrangThaiDoc === false || n.TrangThaiDoc === 0
+  ).length || 0;
 
   const markAsReadMutation = useMutation({
     mutationFn: (id) => api.put(`/notifications/${id}/read`),
@@ -40,7 +43,7 @@ const NotificationBell = () => {
     }
   });
 
-  const unreadCount = notifications?.filter(n => n.TrangThaiDoc === 0).length || 0;
+  const isUnread = (item) => item.TrangThaiDoc === false || item.TrangThaiDoc === 0;
 
   const items = [
     {
@@ -53,7 +56,9 @@ const NotificationBell = () => {
           padding: '8px 12px',
           borderBottom: '1px solid #f0f0f0'
         }}>
-          <strong style={{ fontSize: '16px' }}>Thông báo</strong>
+          <strong style={{ fontSize: '16px' }}>
+            Thông báo {unreadCount > 0 && `(${unreadCount})`}
+          </strong>
           {unreadCount > 0 && (
             <Button 
               type="link" 
@@ -89,22 +94,33 @@ const NotificationBell = () => {
               renderItem={(item) => (
                 <List.Item
                   style={{
-                    background: item.TrangThaiDoc === 0 ? '#e6f7ff' : 'white',
+                    background: isUnread(item) ? '#e6f7ff' : 'white',
                     padding: '12px 16px',
                     cursor: 'pointer',
                     borderBottom: '1px solid #f0f0f0'
                   }}
                   onClick={() => {
-                    if (item.TrangThaiDoc === 0) {
+                    if (isUnread(item)) {
                       markAsReadMutation.mutate(item.MaThongBao);
                     }
                   }}
                 >
                   <List.Item.Meta
+                    avatar={
+                      isUnread(item) && (
+                        <div style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: '#1890ff',
+                          marginTop: 8
+                        }} />
+                      )
+                    }
                     title={
                       <div style={{ 
                         fontSize: '14px',
-                        fontWeight: item.TrangThaiDoc === 0 ? 'bold' : 'normal'
+                        fontWeight: isUnread(item) ? 'bold' : 'normal'
                       }}>
                         {item.NoiDung}
                       </div>

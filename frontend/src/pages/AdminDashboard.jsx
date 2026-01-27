@@ -6,7 +6,8 @@ import {
   SwapOutlined,
   EnvironmentOutlined,
   TeamOutlined,
-  UserOutlined
+  UserOutlined,
+  StarOutlined
 } from '@ant-design/icons';
 import { Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import Header from '../components/common/Header';
@@ -17,6 +18,7 @@ import LocationManagement from '../components/admin/LocationManagement';
 import EmployeeManagement from '../components/admin/EmployeeManagement';
 import UserManagement from '../components/admin/UserManagement';
 import DashboardOverview from '../components/admin/DashboardOverview';
+import ReviewManagement from '../components/admin/ReviewManagement';
 
 const { Sider, Content } = Layout;
 
@@ -60,6 +62,11 @@ const AdminDashboard = () => {
       key: '/admin/users',
       icon: <UserOutlined />,
       label: <Link to="/admin/users">Quản lý Tài khoản</Link>
+    },
+    {
+      key: '/admin/reviews', // ← FIX: Thêm đúng format
+      icon: <StarOutlined />,
+      label: <Link to="/admin/reviews">Quản lý Đánh giá</Link>
     }
   ];
 
@@ -111,6 +118,7 @@ const AdminDashboard = () => {
               <Route path="locations" element={<LocationManagement />} />
               <Route path="employees" element={<EmployeeManagement />} />
               <Route path="users" element={<UserManagement />} />
+              <Route path="reviews" element={<ReviewManagement />} /> {/* ← THÊM ROUTE */}
               <Route path="*" element={<Navigate to="/admin" replace />} />
             </Routes>
           </Content>

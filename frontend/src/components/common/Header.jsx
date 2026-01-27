@@ -1,10 +1,8 @@
 import { Layout, Menu, Button, Dropdown, Avatar, Space } from 'antd';
-import { UserOutlined, LogoutOutlined, DashboardOutlined, HistoryOutlined, FileTextOutlined } from '@ant-design/icons';
+import { UserOutlined, LogoutOutlined, DashboardOutlined, HistoryOutlined, FileTextOutlined, CarOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice';
-
-// 1. Import component thông báo
 import NotificationBell from '../NotificationBell';
 
 const { Header: AntHeader } = Layout;
@@ -20,8 +18,12 @@ const Header = () => {
     navigate('/login');
   };
 
+  // Kiểm tra roles
+  const isAdmin = user?.roles?.some(r => r.TenVaiTro === 'Admin');
+  const isEmployee = user?.roles?.some(r => r.TenVaiTro === 'Nhân viên');
+  const isDriver = user?.roles?.some(r => r.TenVaiTro === 'Tài xế');
+  const isCustomer = !isAdmin && !isEmployee && !isDriver; // ← Thêm biến này
 
-  
   const userMenuItems = [
     {
       key: 'profile',
@@ -29,13 +31,17 @@ const Header = () => {
       label: 'Thông tin cá nhân',
       onClick: () => navigate('/profile'),
     },
-    {
-      key: 'my-bookings',
-      icon: <HistoryOutlined />,
-      label: 'Vé của tôi',
-      onClick: () => navigate('/my-bookings'),
-    },
-    ...(user?.roles?.some(r => r.TenVaiTro === 'Admin')
+    // ===== CHỈ HIỆN "VÉ CỦA TÔI" CHO KHÁCH HÀNG =====
+    ...(isCustomer
+      ? [{
+          key: 'my-bookings',
+          icon: <HistoryOutlined />,
+          label: 'Vé của tôi',
+          onClick: () => navigate('/my-bookings'),
+        }]
+      : []
+    ),
+    ...(isAdmin
       ? [{
           key: 'admin',
           icon: <DashboardOutlined />,
@@ -44,12 +50,21 @@ const Header = () => {
         }]
       : []
     ),
-    ...(user?.roles?.some(r => r.TenVaiTro === 'Nhân viên') && !user?.roles?.some(r => r.TenVaiTro === 'Admin')
+    ...(isEmployee && !isAdmin
       ? [{
           key: 'employee',
           icon: <FileTextOutlined />,
           label: 'Quản lý vé',
           onClick: () => navigate('/employee'),
+        }]
+      : []
+    ),
+    ...(isDriver
+      ? [{
+          key: 'driver',
+          icon: <CarOutlined />,
+          label: 'Lịch làm việc',
+          onClick: () => navigate('/driver'),
         }]
       : []
     ),
@@ -66,7 +81,62 @@ const Header = () => {
   const getSelectedKey = () => {
     if (location.pathname === '/') return 'home';
     if (location.pathname.startsWith('/search')) return 'search';
+    if (location.pathname.startsWith('/employee/trips')) return 'employee-trips';
+    if (location.pathname.startsWith('/employee')) return 'employee';
+    if (location.pathname.startsWith('/driver')) return 'driver';
     return '';
+  };
+
+  // ===== MENU CHÍNH ĐỘNG THEO ROLE =====
+  const getMainMenuItems = () => {
+    const items = [
+      <Menu.Item key="home">
+        <Link to="/">Trang chủ</Link>
+      </Menu.Item>
+    ];
+
+    // Menu cho khách hàng
+    if (isCustomer) {
+      items.push(
+        <Menu.Item key="search">
+          <Link to="/search">Tra cứu chuyến</Link>
+        </Menu.Item>
+      );
+    }
+
+    // Menu cho nhân viên
+    if (isEmployee) {
+      items.push(
+        <Menu.Item key="employee-trips">
+          <Link to="/employee/trips">Quản lý chuyến xe</Link>
+        </Menu.Item>
+      );
+      items.push(
+        <Menu.Item key="employee">
+          <Link to="/employee">Quản lý đơn vé</Link>
+        </Menu.Item>
+      );
+    }
+
+    // Menu cho tài xế
+    if (isDriver) {
+      items.push(
+        <Menu.Item key="driver">
+          <Link to="/driver">Lịch làm việc</Link>
+        </Menu.Item>
+      );
+    }
+
+    // Menu cho admin
+    if (isAdmin) {
+      items.push(
+        <Menu.Item key="admin">
+          <Link to="/admin">Quản trị</Link>
+        </Menu.Item>
+      );
+    }
+
+    return items;
   };
 
   return (
@@ -102,23 +172,14 @@ const Header = () => {
           selectedKeys={[getSelectedKey()]}
           style={{ flex: 1, minWidth: 0, border: 'none', background: 'transparent' }}
         >
-          <Menu.Item key="home">
-            <Link to="/">Trang chủ</Link>
-          </Menu.Item>
-          <Menu.Item key="search">
-            <Link to="/search">Tra cứu chuyến</Link>
-          </Menu.Item>
+          {getMainMenuItems()}
         </Menu>
       </div>
 
       <div>
         {isAuthenticated ? (
-          // 2. Sử dụng Space để đặt Thông báo cạnh Avatar
           <Space size="large">
-            
-            {/* COMPONENT THÔNG BÁO */}
             <NotificationBell />
-
             <Dropdown 
               menu={{ items: userMenuItems }} 
               placement="bottomRight"
